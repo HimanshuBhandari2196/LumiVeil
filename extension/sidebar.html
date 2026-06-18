@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>LumiVeil — Full Report</title>
+  <link rel="stylesheet" href="sidebar.css" />
+</head>
+<body>
+
+  <!-- Theme Toggle -->
+  <button class="theme-toggle" id="themeToggle">
+    <span class="toggle-icon">🌙</span>
+    <span id="toggleText">Dark mode</span>
+  </button>
+
+<div class="header">
+    <div class="logo">
+      <div class="logo-eye">👁</div>
+      LumiVeil
+    </div>
+    <span class="tagline">Full Analysis Report</span>
+  </div>
+
+  <!-- Search Bar -->
+  <div class="search-container">
+    <div class="search-box">
+      <span class="search-icon">🔍</span>
+      <input 
+        type="text" 
+        id="searchInput" 
+        class="search-input" 
+        placeholder="Paste a URL, image link, or type a claim to verify..."
+      />
+      <button id="searchBtn" class="search-btn">Analyze</button>
+      <button id="clearBtn" class="clear-btn">Clear</button>
+    </div>
+  </div>
+
+  <!-- Verdict Banner -->
+  <div class="verdict-banner" id="verdictBanner" style="display:none">
+    <span id="verdictIcon">🔍</span>
+    <span id="verdictText">Analyzing content...</span>
+  </div>
+
+  <!-- Empty State -->
+  <div class="empty-state" id="emptyState">
+    <div class="empty-icon">👁</div>
+    <h2>Lift the veil on fake content</h2>
+    <p>Paste a URL, image link, or type a claim above to start analyzing</p>
+  </div>
+
+  <!-- Loading State -->
+  <div class="loading-state" id="loadingState">
+    <div class="loading-spinner"></div>
+    <p>Analyzing content... please wait</p>
+  </div>
+
+  <!-- Results -->
+  <div class="results-section" id="resultsSection">
+    
+  <!-- Row 1 — Trust Score + Summary -->
+  <div class="grid-2">
+    <div class="section">
+      <h3>
+        <span class="h3-left">Trust Score</span>
+        <span class="section-arrow">▼</span>
+      </h3>
+      <div class="section-preview" id="trustPreview">
+        <span class="preview-dot" id="trustDot"></span>
+        <span id="trustPreviewText">Calculating...</span>
+      </div>
+      <div class="section-content">
+        <div class="trust-score-number" id="trustScore">
+          — <span>/ 100</span>
+        </div>
+        <div class="trust-bar-bg">
+          <div class="trust-bar-fill" id="trustBarFill"></div>
+        </div>
+        <div class="trust-label" id="trustLabel">Calculating...</div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>
+        <span class="h3-left">Summary</span>
+        <span class="section-arrow">▼</span>
+      </h3>
+      <div class="section-preview">
+        <span class="preview-dot" style="background:#a78bfa"></span>
+        <span>Hover to read full summary</span>
+      </div>
+      <div class="section-content">
+        <p id="summaryText" class="body-text">Loading summary...</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Row 2 — Checks + What is Real -->
+  <div class="grid-2">
+    <div class="section">
+      <h3>
+        <span class="h3-left">Checks Performed</span>
+        <span class="section-arrow">▼</span>
+      </h3>
+      <div class="section-preview" id="checksPreview">
+        <span class="preview-dot" style="background:#a78bfa"></span>
+        <span id="checksPreviewText">Loading...</span>
+      </div>
+      <div class="section-content">
+        <ul id="checksList" class="checks-list">
+          <li>Loading checks...</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>
+        <span class="h3-left">What is Real</span>
+        <span class="section-arrow">▼</span>
+      </h3>
+      <div class="section-preview">
+        <span class="preview-dot" style="background:#22c55e"></span>
+        <span>Hover to see verified facts</span>
+      </div>
+      <div class="section-content">
+        <p id="realText" class="body-text">Loading verified facts...</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Row 3 — Sources -->
+  <div class="grid-1">
+    <div class="section">
+      <h3>
+        <span class="h3-left">Sources Checked</span>
+        <span class="section-arrow">▼</span>
+      </h3>
+      <div class="section-preview">
+        <span class="preview-dot" style="background:#a78bfa"></span>
+        <span>Hover to see all sources</span>
+      </div>
+      <div class="section-content">
+        <ul id="sourcesList" class="sources-list">
+          <li>Loading sources...</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <p>Powered by LumiVeil — Lift the veil on fake content</p>
+  </div>
+
+  <script src="sidebar.js"></script>
+</body>
+</html>

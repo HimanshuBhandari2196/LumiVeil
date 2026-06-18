@@ -1,0 +1,10 @@
+flask
+flask-cors
+flask-limiter
+python-dotenv
+requests
+beautifulsoup4
+transformers
+torch
+Pillow
+numpy
