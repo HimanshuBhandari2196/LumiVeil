@@ -2,7 +2,7 @@
 // Runs automatically on every webpage
 
 // ---- SETTINGS ----
-const BACKEND_URL = 'http://localhost:5000/analyze';
+const BACKEND_URL = 'https://lumiveil-api-production-8706.up.railway.app/api/v1/analyze';
 const SCORE_THRESHOLD = 40; // Below this score = show warning
 const ANALYSIS_DELAY = 2000; // Wait 2 seconds before analyzing
 

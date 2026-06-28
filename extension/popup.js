@@ -1,4 +1,4 @@
-const API_BASE     = 'http://localhost:5000';
+const API_BASE     = 'https://lumiveil-api-production-8706.up.railway.app';
 const LUMIVEIL_KEY = 'lumiveil-secret-2026';
 const WEBSITE_URL  = 'https://himanshuBhandari2196.github.io/LumiVeil';
 

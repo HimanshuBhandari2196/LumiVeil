@@ -147,7 +147,7 @@ document.addEventListener('DOMContentLoaded', function () {
         headers['Authorization'] = 'Bearer ' + sessionData.lv_token;
       }
 
-      fetch('http://localhost:5000/api/v1/analyze', {
+      fetch('https://lumiveil-api-production-8706.up.railway.app/api/v1/analyze', {
         method: 'POST',
         headers: headers,
         body: JSON.stringify({ input: input.trim() })
