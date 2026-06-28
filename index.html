@@ -1,0 +1,988 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LumiVeil — Lift the veil on fake content</title>
+  <meta name="description" content="LumiVeil detects fake news, misinformation, and AI-manipulated images in real time as you browse. Free Chrome extension." />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,600;1,9..144,300&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+
+  <style>
+    /* ============================================================
+       TOKENS
+    ============================================================ */
+    :root {
+      --void:      #0C0C10;
+      --surface:   #17171E;
+      --border:    rgba(255,255,255,0.08);
+      --accent:    #7C6FF7;
+      --text:      #FFFFFF;
+      --muted:     #9490A8;
+      --radius:    12px;
+      --radius-lg: 20px;
+    }
+
+    /* ============================================================
+       RESET
+    ============================================================ */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      background: var(--void);
+      color: var(--text);
+      font-family: 'Inter', sans-serif;
+      font-size: 16px;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: inherit; text-decoration: none; }
+    img { display: block; max-width: 100%; }
+    button { cursor: pointer; font-family: inherit; border: none; background: none; }
+
+    .container { max-width: 1100px; margin: 0 auto; padding: 0 28px; }
+    .sr-only {
+      position: absolute; width: 1px; height: 1px;
+      padding: 0; margin: -1px; overflow: hidden;
+      clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+    }
+
+    /* ============================================================
+       NAV
+    ============================================================ */
+    .nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      padding: 18px 0;
+      background: rgba(12,12,16,0.85);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav__inner { display: flex; align-items: center; justify-content: space-between; }
+    .nav__logo {
+      display: flex; align-items: center; gap: 9px;
+      font-weight: 600; font-size: 17px; letter-spacing: -0.2px;
+    }
+    .nav__logo svg { color: var(--accent); flex-shrink: 0; }
+    .nav__links { display: flex; align-items: center; gap: 32px; list-style: none; }
+    .nav__links a { font-size: 14px; color: var(--muted); transition: color 0.2s; }
+    .nav__links a:hover { color: var(--text); }
+    .nav__cta {
+      display: inline-flex; align-items: center; gap: 7px;
+      padding: 9px 20px; border-radius: 100px;
+      background: var(--accent); color: #fff;
+      font-size: 14px; font-weight: 500;
+      transition: background 0.2s, transform 0.15s;
+    }
+    .nav__cta:hover { background: #6A5FE0; transform: translateY(-1px); }
+
+    /* ============================================================
+       HERO
+    ============================================================ */
+    .hero {
+      min-height: 100vh;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      text-align: center; padding: 120px 28px 80px;
+      background: linear-gradient(180deg,
+        #0C0C10 0%, #141420 25%, #2B2840 55%, #8C87B0 78%, #E0DBF0 100%);
+      position: relative; overflow: hidden;
+    }
+    .hero::before {
+      content: '';
+      position: absolute; top: 30%; left: 50%; transform: translate(-50%, -50%);
+      width: 600px; height: 300px;
+      background: radial-gradient(ellipse, rgba(124,111,247,0.15) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .hero__eyebrow {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 6px 14px; border-radius: 100px;
+      border: 1px solid rgba(124,111,247,0.35);
+      background: rgba(124,111,247,0.08);
+      font-size: 12px; font-weight: 500; color: #A89FF5;
+      letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 28px;
+    }
+    .hero__eyebrow span {
+      width: 6px; height: 6px; border-radius: 50%; background: var(--accent);
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%       { opacity: 0.5; transform: scale(0.8); }
+    }
+    .hero__title {
+      font-family: 'Fraunces', serif;
+      font-size: clamp(40px, 6vw, 72px);
+      font-weight: 600; line-height: 1.08;
+      letter-spacing: -1.5px; color: var(--text);
+      max-width: 760px; margin: 0 auto 20px;
+    }
+    .hero__title em { font-style: italic; font-weight: 300; color: rgba(255,255,255,0.75); }
+    .hero__sub {
+      font-size: 17px; color: rgba(255,255,255,0.55);
+      max-width: 460px; margin: 0 auto 48px; line-height: 1.65;
+    }
+    .hero__card {
+      background: rgba(15,15,22,0.75);
+      border: 1.5px dashed rgba(255,255,255,0.15);
+      border-radius: var(--radius-lg);
+      padding: 36px 28px; max-width: 560px; width: 100%;
+      margin: 0 auto 20px;
+      backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+      transition: border-color 0.2s;
+    }
+    .hero__card:hover { border-color: rgba(124,111,247,0.4); }
+    .hero__card-icon { width: 40px; height: 40px; margin: 0 auto 12px; color: rgba(255,255,255,0.4); }
+    .hero__card-text { font-size: 14px; color: rgba(255,255,255,0.4); }
+    .hero__toggles {
+      display: flex; flex-wrap: wrap; justify-content: center;
+      gap: 8px; margin-bottom: 24px;
+    }
+    .toggle {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 8px 18px; border-radius: 100px;
+      border: 1px solid rgba(255,255,255,0.15);
+      background: rgba(255,255,255,0.05);
+      font-size: 13px; font-weight: 500; color: rgba(255,255,255,0.6);
+      transition: all 0.18s;
+    }
+    .toggle:hover { background: rgba(255,255,255,0.1); color: var(--text); }
+    .toggle.is-active { background: var(--text); color: var(--void); border-color: var(--text); }
+    .hero__analyze {
+      display: inline-flex; align-items: center; gap: 9px;
+      padding: 14px 30px; border-radius: 100px;
+      background: rgba(20,20,30,0.85);
+      border: 1px solid rgba(255,255,255,0.18);
+      color: rgba(255,255,255,0.85); font-size: 15px; font-weight: 500;
+      backdrop-filter: blur(4px); transition: all 0.2s;
+    }
+    .hero__analyze:hover {
+      background: rgba(40,38,65,0.9);
+      border-color: rgba(124,111,247,0.5); color: #fff; transform: translateY(-1px);
+    }
+
+    /* ============================================================
+       FEATURE STRIP
+    ============================================================ */
+    .features {
+      background: #111117;
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+    }
+    .features__grid { display: grid; grid-template-columns: repeat(4, 1fr); }
+    .feature {
+      padding: 32px 24px;
+      border-right: 1px solid var(--border);
+      display: flex; flex-direction: column; align-items: center;
+      text-align: center; gap: 10px; transition: background 0.2s;
+    }
+    .feature:last-child { border-right: none; }
+    .feature:hover { background: rgba(255,255,255,0.02); }
+    .feature__icon {
+      width: 40px; height: 40px; border-radius: 10px;
+      background: rgba(124,111,247,0.12);
+      display: flex; align-items: center; justify-content: center; color: var(--accent);
+    }
+    .feature__name { font-size: 14px; font-weight: 600; color: var(--text); }
+    .feature__desc { font-size: 12px; color: var(--muted); line-height: 1.45; }
+
+    /* ============================================================
+       HOW IT WORKS
+    ============================================================ */
+    .how { padding: 100px 0; background: var(--void); }
+    .section-label {
+      font-size: 11px; font-weight: 600; letter-spacing: 0.12em;
+      text-transform: uppercase; color: var(--accent); margin-bottom: 14px;
+    }
+    .section-title {
+      font-family: 'Fraunces', serif;
+      font-size: clamp(28px, 4vw, 44px);
+      font-weight: 600; letter-spacing: -0.8px; line-height: 1.15; margin-bottom: 16px;
+    }
+    .section-sub { font-size: 16px; color: var(--muted); max-width: 460px; line-height: 1.65; }
+    .how__layout {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 80px; align-items: center; margin-top: 64px;
+    }
+    .how__steps { display: flex; flex-direction: column; gap: 0; }
+    .step {
+      display: flex; gap: 20px; padding: 28px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .step:last-child { border-bottom: none; }
+    .step__num {
+      font-family: 'Fraunces', serif; font-size: 13px;
+      font-weight: 600; color: var(--accent); opacity: 0.7;
+      min-width: 28px; padding-top: 2px;
+    }
+    .step__title { font-size: 15px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+    .step__desc { font-size: 14px; color: var(--muted); line-height: 1.6; }
+    .how__visual {
+      background: var(--surface); border-radius: var(--radius-lg);
+      border: 1px solid var(--border); overflow: hidden;
+    }
+    .mock-browser__bar {
+      background: #1E1E28; padding: 12px 16px;
+      display: flex; align-items: center; gap: 10px;
+      border-bottom: 1px solid var(--border);
+    }
+    .mock-browser__dots { display: flex; gap: 6px; }
+    .mock-browser__dot { width: 10px; height: 10px; border-radius: 50%; }
+    .mock-browser__dot:nth-child(1) { background: #FF5F57; }
+    .mock-browser__dot:nth-child(2) { background: #FFBD2E; }
+    .mock-browser__dot:nth-child(3) { background: #28CA41; }
+    .mock-browser__url {
+      flex: 1; background: rgba(255,255,255,0.05); border-radius: 6px;
+      padding: 5px 12px; font-size: 12px; color: var(--muted);
+    }
+    .mock-browser__body { padding: 24px; }
+    .mock-article__headline { font-size: 15px; font-weight: 600; color: var(--text); margin-bottom: 8px; line-height: 1.4; }
+    .mock-article__meta { font-size: 11px; color: var(--muted); margin-bottom: 14px; }
+    .mock-article__lines { display: flex; flex-direction: column; gap: 6px; margin-bottom: 20px; }
+    .mock-article__line { height: 8px; background: rgba(255,255,255,0.07); border-radius: 4px; }
+    .mock-article__line:last-child { width: 65%; }
+    .mock-banner {
+      border-radius: 10px; background: rgba(124,111,247,0.1);
+      border: 1px solid rgba(124,111,247,0.25);
+      padding: 14px 16px; display: flex; align-items: center; gap: 12px;
+    }
+    .mock-banner__icon {
+      width: 32px; height: 32px; border-radius: 8px; background: var(--accent);
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; color: #fff;
+    }
+    .mock-banner__verdict { font-size: 12px; font-weight: 600; color: #FF6B6B; margin-bottom: 2px; }
+    .mock-banner__sub { font-size: 11px; color: var(--muted); }
+    .mock-banner__score {
+      margin-left: auto; font-family: 'Fraunces', serif;
+      font-size: 22px; font-weight: 600; color: #FF6B6B;
+    }
+
+    /* ============================================================
+       PRICING
+    ============================================================ */
+    .pricing { padding: 100px 0; background: #0F0F14; border-top: 1px solid var(--border); }
+    .pricing__header { margin-bottom: 40px; }
+
+    /* Monthly / Yearly toggle */
+    .billing-toggle {
+      display: inline-flex; align-items: center; gap: 0;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 100px; padding: 4px; margin-top: 24px;
+    }
+    .billing-toggle__btn {
+      padding: 7px 20px; border-radius: 100px;
+      font-size: 13px; font-weight: 500; color: var(--muted);
+      transition: all 0.2s; position: relative;
+    }
+    .billing-toggle__btn.is-active { background: var(--accent); color: #fff; }
+    .billing-toggle__save {
+      position: absolute; top: -8px; right: -4px;
+      background: #22C55E; color: #fff;
+      font-size: 9px; font-weight: 700; letter-spacing: 0.04em;
+      padding: 2px 6px; border-radius: 100px; white-space: nowrap;
+    }
+
+    .pricing__grid {
+      display: grid; grid-template-columns: repeat(3, 1fr);
+      gap: 20px; margin-top: 48px;
+    }
+    .plan {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius-lg); padding: 32px 28px;
+      position: relative; transition: border-color 0.2s;
+      display: flex; flex-direction: column;
+    }
+    .plan:hover { border-color: rgba(124,111,247,0.3); }
+    .plan--pro {
+      border-color: rgba(124,111,247,0.4);
+      background: linear-gradient(160deg, #1A1830 0%, #17171E 60%);
+    }
+    .plan--max {
+      border-color: rgba(124,111,247,0.2);
+    }
+    .plan__badge {
+      position: absolute; top: -12px; left: 50%; transform: translateX(-50%);
+      background: var(--accent); color: #fff;
+      font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+      padding: 4px 14px; border-radius: 100px; white-space: nowrap;
+    }
+    .plan__name {
+      font-size: 12px; font-weight: 700; letter-spacing: 0.1em;
+      text-transform: uppercase; color: var(--muted); margin-bottom: 16px;
+    }
+    .plan__price {
+      display: flex; align-items: baseline; gap: 3px; margin-bottom: 4px;
+    }
+    .plan__price-currency { font-size: 18px; color: var(--muted); align-self: flex-start; padding-top: 8px; }
+    .plan__price-amount {
+      font-family: 'Fraunces', serif; font-size: 44px; font-weight: 600;
+      letter-spacing: -1px; color: var(--text); line-height: 1;
+      transition: all 0.3s;
+    }
+    .plan__price-period { font-size: 12px; color: var(--muted); }
+    .plan__tagline { font-size: 13px; color: var(--muted); margin-bottom: 24px; line-height: 1.5; margin-top: 8px; }
+    .plan__divider { height: 1px; background: var(--border); margin-bottom: 20px; }
+    .plan__features {
+      list-style: none; display: flex; flex-direction: column; gap: 11px;
+      margin-bottom: 28px; flex: 1;
+    }
+    .plan__feature {
+      display: flex; align-items: flex-start; gap: 9px;
+      font-size: 13px; color: var(--muted); line-height: 1.45;
+    }
+    .plan__feature svg { flex-shrink: 0; margin-top: 2px; color: var(--accent); }
+    .plan__feature--locked svg { color: rgba(255,255,255,0.18); }
+    .plan__feature--locked { color: rgba(255,255,255,0.22); }
+    .plan__btn {
+      display: block; width: 100%; padding: 12px; border-radius: 10px;
+      text-align: center; font-size: 14px; font-weight: 600; transition: all 0.2s;
+      margin-top: auto;
+    }
+    .plan__btn--free {
+      background: rgba(255,255,255,0.06); color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .plan__btn--free:hover { background: rgba(255,255,255,0.1); }
+    .plan__btn--pro { background: var(--accent); color: #fff; }
+    .plan__btn--pro:hover { background: #6A5FE0; transform: translateY(-1px); }
+    .plan__btn--max {
+      background: rgba(124,111,247,0.12); color: var(--accent);
+      border: 1px solid rgba(124,111,247,0.3);
+    }
+    .plan__btn--max:hover { background: rgba(124,111,247,0.2); }
+
+    /* ============================================================
+       WHAT'S NEXT — WIP SECTION
+    ============================================================ */
+    .whats-next { padding: 90px 0; background: var(--void); border-top: 1px solid var(--border); }
+    .whats-next__header { margin-bottom: 48px; }
+    .wip-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 36px 40px;
+      display: grid; grid-template-columns: auto 1fr auto;
+      align-items: center; gap: 32px;
+      transition: border-color 0.2s;
+    }
+    .wip-card:hover { border-color: rgba(124,111,247,0.3); }
+    .wip-card__icon {
+      width: 56px; height: 56px; border-radius: 14px;
+      background: rgba(124,111,247,0.1);
+      border: 1px solid rgba(124,111,247,0.2);
+      display: flex; align-items: center; justify-content: center;
+      color: var(--accent); flex-shrink: 0;
+    }
+    .wip-card__body {}
+    .wip-card__label {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 10px; font-weight: 700; letter-spacing: 0.1em;
+      text-transform: uppercase; color: #F59E0B; margin-bottom: 8px;
+    }
+    .wip-card__label-dot {
+      width: 5px; height: 5px; border-radius: 50%; background: #F59E0B;
+      animation: pulse 2s infinite;
+    }
+    .wip-card__title { font-size: 18px; font-weight: 600; color: var(--text); margin-bottom: 8px; }
+    .wip-card__desc { font-size: 14px; color: var(--muted); line-height: 1.6; max-width: 560px; }
+    .wip-card__cta {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 11px 22px; border-radius: 100px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.04);
+      font-size: 13px; font-weight: 500; color: rgba(255,255,255,0.7);
+      white-space: nowrap; transition: all 0.2s; flex-shrink: 0;
+    }
+    .wip-card__cta:hover { background: rgba(255,255,255,0.08); color: #fff; border-color: rgba(255,255,255,0.2); }
+
+    /* ============================================================
+       CONTACT
+    ============================================================ */
+    .contact { padding: 90px 0; background: #0F0F14; border-top: 1px solid var(--border); }
+    .contact__inner {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 80px; align-items: center;
+    }
+    .contact__links { display: flex; flex-direction: column; gap: 16px; margin-top: 32px; }
+    .contact__link {
+      display: flex; align-items: center; gap: 16px;
+      padding: 18px 22px; border-radius: var(--radius);
+      border: 1px solid var(--border); background: var(--surface);
+      transition: all 0.2s;
+    }
+    .contact__link:hover { border-color: rgba(124,111,247,0.35); transform: translateX(4px); }
+    .contact__link-icon {
+      width: 40px; height: 40px; border-radius: 10px;
+      background: rgba(124,111,247,0.1);
+      display: flex; align-items: center; justify-content: center;
+      color: var(--accent); flex-shrink: 0;
+    }
+    .contact__link-body {}
+    .contact__link-label { font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: 3px; }
+    .contact__link-value { font-size: 14px; font-weight: 500; color: var(--text); }
+    .contact__visual {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius-lg); padding: 36px;
+      display: flex; flex-direction: column; gap: 20px;
+    }
+    .contact__visual-title { font-size: 13px; font-weight: 600; color: var(--muted); }
+    .contact__stat { display: flex; flex-direction: column; gap: 4px; }
+    .contact__stat-num {
+      font-family: 'Fraunces', serif; font-size: 36px; font-weight: 600;
+      color: var(--text); letter-spacing: -1px; line-height: 1;
+    }
+    .contact__stat-label { font-size: 13px; color: var(--muted); }
+    .contact__stat-divider { height: 1px; background: var(--border); }
+
+    /* ============================================================
+       FOOTER
+    ============================================================ */
+    .footer { background: var(--void); border-top: 1px solid var(--border); padding: 48px 0 32px; }
+    .footer__inner {
+      display: flex; align-items: flex-start; justify-content: space-between;
+      gap: 40px; flex-wrap: wrap; margin-bottom: 40px;
+    }
+    .footer__logo {
+      display: flex; align-items: center; gap: 8px;
+      font-weight: 600; font-size: 16px; margin-bottom: 10px;
+    }
+    .footer__logo svg { color: var(--accent); }
+    .footer__tagline { font-size: 13px; color: var(--muted); max-width: 240px; line-height: 1.55; }
+    .footer__links-title {
+      font-size: 11px; font-weight: 600; letter-spacing: 0.1em;
+      text-transform: uppercase; color: var(--muted); margin-bottom: 14px;
+    }
+    .footer__links { list-style: none; display: flex; flex-direction: column; gap: 10px; }
+    .footer__links a { font-size: 13px; color: rgba(255,255,255,0.5); transition: color 0.2s; }
+    .footer__links a:hover { color: var(--text); }
+    .footer__translate { display: flex; flex-direction: column; gap: 10px; }
+    .footer__translate-label {
+      font-size: 11px; font-weight: 600; letter-spacing: 0.1em;
+      text-transform: uppercase; color: var(--muted);
+    }
+    .footer__bottom {
+      border-top: 1px solid var(--border); padding-top: 24px;
+      display: flex; align-items: center; justify-content: space-between;
+      flex-wrap: wrap; gap: 12px;
+    }
+    .footer__copy { font-size: 12px; color: rgba(255,255,255,0.3); }
+    .footer__legal { display: flex; gap: 20px; list-style: none; }
+    .footer__legal a { font-size: 12px; color: rgba(255,255,255,0.3); transition: color 0.2s; }
+    .footer__legal a:hover { color: rgba(255,255,255,0.6); }
+
+    /* Google Translate */
+    .skiptranslate { display: none !important; }
+    body { top: 0 !important; }
+
+    /* ============================================================
+       RESPONSIVE
+    ============================================================ */
+    @media (max-width: 900px) {
+      .pricing__grid { grid-template-columns: 1fr; max-width: 400px; margin-left: auto; margin-right: auto; }
+      .how__layout { grid-template-columns: 1fr; gap: 40px; }
+      .contact__inner { grid-template-columns: 1fr; gap: 40px; }
+      .wip-card { grid-template-columns: auto 1fr; }
+      .wip-card__cta { grid-column: 1 / -1; justify-self: start; }
+    }
+    @media (max-width: 768px) {
+      .nav__links { display: none; }
+      .features__grid { grid-template-columns: repeat(2, 1fr); }
+      .feature:nth-child(2) { border-right: none; }
+      .feature:nth-child(3) { border-right: 1px solid var(--border); border-top: 1px solid var(--border); }
+      .feature:nth-child(4) { border-right: none; border-top: 1px solid var(--border); }
+      .footer__inner { flex-direction: column; }
+      .footer__bottom { flex-direction: column; align-items: flex-start; }
+      .wip-card { grid-template-columns: 1fr; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- NAV -->
+  <header class="nav" role="banner">
+    <div class="container nav__inner">
+      <a href="#" class="nav__logo" aria-label="LumiVeil home">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <ellipse cx="12" cy="12" rx="10" ry="6"/>
+          <circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/>
+        </svg>
+        LumiVeil
+      </a>
+      <nav aria-label="Main navigation">
+        <ul class="nav__links">
+          <li><a href="#how-it-works">How it works</a></li>
+          <li><a href="#pricing">Pricing</a></li>
+          <li><a href="#contact">Contact us</a></li>
+        </ul>
+      </nav>
+      <a href="https://github.com/HimanshuBhandari2196/LumiVeil" target="_blank" rel="noopener" class="nav__cta">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Install free
+      </a>
+    </div>
+  </header>
+
+  <main>
+
+    <!-- HERO -->
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero__eyebrow">
+        <span aria-hidden="true"></span>
+        Open source · Free Chrome extension
+      </div>
+      <h1 class="hero__title" id="hero-title">
+        Lift the veil on<br><em>fake content</em>
+      </h1>
+      <p class="hero__sub">
+        Real-time misinformation detection as you browse. Drop an image, paste a URL, or type a claim.
+      </p>
+      <div class="hero__card" role="region" aria-label="Content input area">
+        <svg class="hero__card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+          <polyline points="17 8 12 3 7 8"/>
+          <line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+        <p class="hero__card-text">Drop an image or video, paste a URL, or type a claim</p>
+      </div>
+      <div class="hero__toggles" role="group" aria-label="Content type">
+        <button class="toggle is-active" onclick="setToggle(this)" aria-pressed="true">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+          Image
+        </button>
+        <button class="toggle" onclick="setToggle(this)" aria-pressed="false">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+          News
+        </button>
+        <button class="toggle" onclick="setToggle(this)" aria-pressed="false">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 3a10.9 10.9 0 01-3.14 1.53 4.48 4.48 0 00-7.86 3v1A10.66 10.66 0 013 4s-4 9 5 13a11.64 11.64 0 01-7 2c9 5 20 0 20-11.5a4.5 4.5 0 00-.08-.83A7.72 7.72 0 0023 3z"/></svg>
+          Social post
+        </button>
+      </div>
+      <button class="hero__analyze" onclick="document.getElementById('how-it-works').scrollIntoView({behavior:'smooth'})">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        Analyze now
+      </button>
+    </section>
+
+    <!-- FEATURE STRIP -->
+    <section class="features" aria-label="Core capabilities">
+      <div class="container">
+        <div class="features__grid">
+          <div class="feature">
+            <div class="feature__icon" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+            </div>
+            <div class="feature__name">Image check</div>
+            <div class="feature__desc">ELA analysis + reverse image search</div>
+          </div>
+          <div class="feature">
+            <div class="feature__icon" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            </div>
+            <div class="feature__name">Deepfake detect</div>
+            <div class="feature__desc">AI face analysis via Sightengine</div>
+          </div>
+          <div class="feature">
+            <div class="feature__icon" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+            </div>
+            <div class="feature__name">News verify</div>
+            <div class="feature__desc">Cross-reference 100+ trusted sources</div>
+          </div>
+          <div class="feature">
+            <div class="feature__icon" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 010 20M12 2a15.3 15.3 0 000 20"/></svg>
+            </div>
+            <div class="feature__name">Origin trace</div>
+            <div class="feature__desc">Find the original source of a claim</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- HOW IT WORKS -->
+    <section class="how" id="how-it-works" aria-labelledby="how-title">
+      <div class="container">
+        <p class="section-label">How it works</p>
+        <h2 class="section-title" id="how-title">From suspicious to certain<br>in three steps</h2>
+        <p class="section-sub">No switching tabs, no manual searching. LumiVeil works silently in your browser and speaks up when it matters.</p>
+        <div class="how__layout">
+          <div class="how__steps">
+            <div class="step">
+              <span class="step__num">01</span>
+              <div>
+                <div class="step__title">Browse normally</div>
+                <div class="step__desc">Install the extension once. LumiVeil runs quietly in the background on every page you visit — no action needed from you.</div>
+              </div>
+            </div>
+            <div class="step">
+              <span class="step__num">02</span>
+              <div>
+                <div class="step__title">Content gets analysed</div>
+                <div class="step__desc">Within 2 seconds of page load, LumiVeil checks the URL against 100+ trusted domains, scans for sensational language, and inspects images for AI generation or deepfakes.</div>
+              </div>
+            </div>
+            <div class="step">
+              <span class="step__num">03</span>
+              <div>
+                <div class="step__title">You get a verdict</div>
+                <div class="step__desc">If the trust score drops below 40, a warning banner slides in at the top of the page. Click "View full report" for a detailed breakdown of every check performed.</div>
+              </div>
+            </div>
+          </div>
+          <div class="how__visual" aria-hidden="true">
+            <div class="mock-browser__bar">
+              <div class="mock-browser__dots">
+                <div class="mock-browser__dot"></div>
+                <div class="mock-browser__dot"></div>
+                <div class="mock-browser__dot"></div>
+              </div>
+              <div class="mock-browser__url">viraltruth24.com/shocking-government-secret</div>
+            </div>
+            <div class="mock-browser__body">
+              <div class="mock-article__headline">SHOCKING: Government Finally Admits What They've Been Hiding For YEARS!!</div>
+              <div class="mock-article__meta">Posted 3 minutes ago · viraltruth24.com</div>
+              <div class="mock-article__lines">
+                <div class="mock-article__line"></div>
+                <div class="mock-article__line"></div>
+                <div class="mock-article__line"></div>
+                <div class="mock-article__line"></div>
+                <div class="mock-article__line"></div>
+              </div>
+              <div class="mock-banner">
+                <div class="mock-banner__icon">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="12" rx="10" ry="6"/><circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/></svg>
+                </div>
+                <div class="mock-banner__text">
+                  <div class="mock-banner__verdict">⚠️ Low credibility detected</div>
+                  <div class="mock-banner__sub">Sensational language · Unknown domain · 4 red flags</div>
+                </div>
+                <div class="mock-banner__score">18</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- PRICING -->
+    <section class="pricing" id="pricing" aria-labelledby="pricing-title">
+      <div class="container">
+        <div class="pricing__header">
+          <p class="section-label">Pricing</p>
+          <h2 class="section-title" id="pricing-title">Start free, upgrade when you need to</h2>
+          <p class="section-sub">No credit card required to get started.</p>
+          <div class="billing-toggle" role="group" aria-label="Billing period">
+            <button class="billing-toggle__btn is-active" onclick="setBilling('monthly', this)" aria-pressed="true">Monthly</button>
+            <button class="billing-toggle__btn" onclick="setBilling('yearly', this)" aria-pressed="false">
+              Yearly
+              <span class="billing-toggle__save">Save 20%</span>
+            </button>
+          </div>
+        </div>
+        <div class="pricing__grid">
+
+          <!-- Free -->
+          <div class="plan">
+            <div class="plan__name">Free</div>
+            <div class="plan__price">
+              <span class="plan__price-currency">$</span>
+              <span class="plan__price-amount" id="price-free">0</span>
+              <span class="plan__price-period" id="period-free">/ month</span>
+            </div>
+            <p class="plan__tagline">For casual readers who want a safety net while browsing.</p>
+            <div class="plan__divider"></div>
+            <ul class="plan__features">
+              <li class="plan__feature">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+                30 analyses per day
+              </li>
+              <li class="plan__feature">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+                URL credibility check
+              </li>
+              <li class="plan__feature">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+                Sensationalism detection
+              </li>
+              <li class="plan__feature">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+                Auto warning banner
+              </li>
+              <li class="plan__feature plan__feature--locked">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+                Image &amp; deepfake analysis
+              </li>
+              <li class="plan__feature plan__feature--locked">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+                Analysis history
+              </li>
+            </ul>
+            <a href="https://github.com/HimanshuBhandari2196/LumiVeil" target="_blank" rel="noopener" class="plan__btn plan__btn--free">Get started free</a>
+          </div>
+
+          <!-- Pro -->
+          <div class="plan plan--pro">
+            <div class="plan__badge">Most popular</div>
+            <div class="plan__name">Pro</div>
+            <div class="plan__price">
+              <span class="plan__price-currency">$</span>
+              <span class="plan__price-amount" id="price-pro">6</span>
+              <span class="plan__price-period" id="period-pro">/ month</span>
+            </div>
+            <p class="plan__tagline">For journalists and researchers who take misinformation seriously.</p>
+            <div class="plan__divider"></div>
+            <ul class="plan__features">
+              <li class="plan__feature">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+                300 analyses per day
+              </li>
+              <li class="plan__feature">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+                Everything in Free
+              </li>
+              <li class="plan__feature">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+                Image &amp; deepfake analysis
+              </li>
+              <li class="plan__feature">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+                Last 50 analyses saved
+              </li>
+              <li class="plan__feature">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+                No wait between refreshes
+              </li>
+              <li class="plan__feature plan__feature--locked">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+                API access
+              </li>
+            </ul>
+            <a href="#contact" class="plan__btn plan__btn--pro">Coming soon — get notified</a>
+          </div>
+
+          <!-- Max -->
+          <div class="plan plan--max">
+            <div class="plan__name">Max</div>
+            <div class="plan__price">
+              <span class="plan__price-currency">$</span>
+              <span class="plan__price-amount" id="price-max">12</span>
+              <span class="plan__price-period" id="period-max">/ month</span>
+            </div>
+            <p class="plan__tagline">For power users, teams, and developers building on top of LumiVeil.</p>
+            <div class="plan__divider"></div>
+            <ul class="plan__features">
+              <li class="plan__feature">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+                Unlimited analyses
+              </li>
+              <li class="plan__feature">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+                Everything in Pro
+              </li>
+              <li class="plan__feature">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+                Full analysis history
+              </li>
+              <li class="plan__feature">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+                API access for developers
+              </li>
+              <li class="plan__feature">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+                Priority support
+              </li>
+              <li class="plan__feature">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+                Early access to new features
+              </li>
+            </ul>
+            <a href="#contact" class="plan__btn plan__btn--max">Coming soon — get notified</a>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- WHAT'S NEXT -->
+    <section class="whats-next" aria-labelledby="next-title">
+      <div class="container">
+        <div class="whats-next__header">
+          <p class="section-label">What's next</p>
+          <h2 class="section-title" id="next-title">Work in progress</h2>
+          <p class="section-sub">Features actively being researched and built. Follow the repo to stay updated.</p>
+        </div>
+        <div class="wip-card">
+          <div class="wip-card__icon" aria-hidden="true">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+          </div>
+          <div class="wip-card__body">
+            <div class="wip-card__label">
+              <span class="wip-card__label-dot" aria-hidden="true"></span>
+              In development
+            </div>
+            <div class="wip-card__title">Video deepfake detection</div>
+            <div class="wip-card__desc">
+              Unlike images, video deepfakes hide their artifacts in the motion between frames — not in any single frame. This makes detection fundamentally harder and more computationally expensive. We're researching temporal analysis techniques and evaluating APIs that go beyond frame-by-frame sampling. Contributions and ideas are welcome.
+            </div>
+          </div>
+          <a href="https://github.com/HimanshuBhandari2196/LumiVeil/issues" target="_blank" rel="noopener" class="wip-card__cta">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 00-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0020 4.77 5.07 5.07 0 0019.91 1S18.73.65 16 2.48a13.38 13.38 0 00-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 005 4.77a5.44 5.44 0 00-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 009 18.13V22"/></svg>
+            Contribute on GitHub
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <!-- CONTACT -->
+    <section class="contact" id="contact" aria-labelledby="contact-title">
+      <div class="container">
+        <div class="contact__inner">
+          <div>
+            <p class="section-label">Contact us</p>
+            <h2 class="section-title" id="contact-title">Questions?<br>We're reachable.</h2>
+            <p class="section-sub">Whether you've found a bug, want to contribute, or just want to say hi — reach out directly.</p>
+            <div class="contact__links">
+              <a href="mailto:Himanshubhandari224@gmail.com" class="contact__link">
+                <div class="contact__link-icon" aria-hidden="true">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+                </div>
+                <div class="contact__link-body">
+                  <div class="contact__link-label">Email</div>
+                  <div class="contact__link-value">Himanshubhandari224@gmail.com</div>
+                </div>
+              </a>
+              <a href="https://github.com/HimanshuBhandari2196" target="_blank" rel="noopener" class="contact__link">
+                <div class="contact__link-icon" aria-hidden="true">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 00-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0020 4.77 5.07 5.07 0 0019.91 1S18.73.65 16 2.48a13.38 13.38 0 00-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 005 4.77a5.44 5.44 0 00-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 009 18.13V22"/></svg>
+                </div>
+                <div class="contact__link-body">
+                  <div class="contact__link-label">GitHub</div>
+                  <div class="contact__link-value">github.com/HimanshuBhandari2196</div>
+                </div>
+              </a>
+            </div>
+          </div>
+          <div class="contact__visual" aria-hidden="true">
+            <div class="contact__visual-title">Project at a glance</div>
+            <div class="contact__stat">
+              <div class="contact__stat-num">100+</div>
+              <div class="contact__stat-label">Trusted domains checked per scan</div>
+            </div>
+            <div class="contact__stat-divider"></div>
+            <div class="contact__stat">
+              <div class="contact__stat-num">100+</div>
+              <div class="contact__stat-label">Sensationalism patterns detected</div>
+            </div>
+            <div class="contact__stat-divider"></div>
+            <div class="contact__stat">
+              <div class="contact__stat-num">2s</div>
+              <div class="contact__stat-label">Average time to verdict</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- FOOTER -->
+  <footer class="footer" role="contentinfo">
+    <div class="container">
+      <div class="footer__inner">
+        <div>
+          <div class="footer__logo">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <ellipse cx="12" cy="12" rx="10" ry="6"/>
+              <circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/>
+            </svg>
+            LumiVeil
+          </div>
+          <p class="footer__tagline">Open-source fake news and misinformation detection for everyone.</p>
+        </div>
+        <div>
+          <div class="footer__links-title">Product</div>
+          <ul class="footer__links">
+            <li><a href="#how-it-works">How it works</a></li>
+            <li><a href="#pricing">Pricing</a></li>
+            <li><a href="https://github.com/HimanshuBhandari2196/LumiVeil" target="_blank" rel="noopener">GitHub</a></li>
+          </ul>
+        </div>
+        <div>
+          <div class="footer__links-title">Resources</div>
+          <ul class="footer__links">
+            <li><a href="https://github.com/HimanshuBhandari2196/LumiVeil/blob/main/README.md" target="_blank" rel="noopener">README</a></li>
+            <li><a href="https://github.com/HimanshuBhandari2196/LumiVeil/issues" target="_blank" rel="noopener">Report a bug</a></li>
+            <li><a href="https://github.com/HimanshuBhandari2196/LumiVeil/issues" target="_blank" rel="noopener">Contribute</a></li>
+          </ul>
+        </div>
+        <div class="footer__translate">
+          <div class="footer__translate-label">Language</div>
+          <div id="google_translate_element"></div>
+        </div>
+      </div>
+      <div class="footer__bottom">
+        <p class="footer__copy">© 2026 LumiVeil · Open source under MIT License</p>
+        <ul class="footer__legal">
+          <li><a href="#">Privacy</a></li>
+          <li><a href="#">Terms</a></li>
+        </ul>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    // Content type toggles
+    function setToggle(el) {
+      document.querySelectorAll('.toggle').forEach(function(b) {
+        b.classList.remove('is-active');
+        b.setAttribute('aria-pressed', 'false');
+      });
+      el.classList.add('is-active');
+      el.setAttribute('aria-pressed', 'true');
+    }
+
+    // Billing toggle — monthly vs yearly
+    var prices = {
+      monthly: { free: '0', pro: '6',  max: '12', periodFree: '/ month', periodPro: '/ month', periodMax: '/ month' },
+      yearly:  { free: '0', pro: '59', max: '100', periodFree: '/ year',  periodPro: '/ year',  periodMax: '/ year'  }
+    };
+
+    function setBilling(period, btn) {
+      document.querySelectorAll('.billing-toggle__btn').forEach(function(b) {
+        b.classList.remove('is-active');
+        b.setAttribute('aria-pressed', 'false');
+      });
+      btn.classList.add('is-active');
+      btn.setAttribute('aria-pressed', 'true');
+
+      var p = prices[period];
+      document.getElementById('price-free').textContent = p.free;
+      document.getElementById('price-pro').textContent  = p.pro;
+      document.getElementById('price-max').textContent  = p.max;
+      document.getElementById('period-free').textContent = p.periodFree;
+      document.getElementById('period-pro').textContent  = p.periodPro;
+      document.getElementById('period-max').textContent  = p.periodMax;
+    }
+  </script>
+
+  <!-- Google Translate — free, no API key needed -->
+  <script>
+    function googleTranslateElementInit() {
+      new google.translate.TranslateElement({
+        pageLanguage: 'en',
+        includedLanguages: '',
+        layout: google.translate.TranslateElement.InlineLayout.SIMPLE,
+        autoDisplay: false
+      }, 'google_translate_element');
+    }
+  </script>
+  <script src="//translate.google.com/translate_a/element.js?cb=googleTranslateElementInit" async defer></script>
+
+</body>
+</html>

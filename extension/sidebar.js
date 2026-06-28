@@ -3,25 +3,26 @@ const themeToggle = document.getElementById('themeToggle');
 const toggleText = document.getElementById('toggleText');
 const toggleIcon = document.querySelector('.toggle-icon');
 
-const savedTheme = localStorage.getItem('lumiveil-theme') || 'light';
-if (savedTheme === 'dark') {
-  document.documentElement.setAttribute('data-theme', 'dark');
+// Default is now dark — matches new design
+const savedTheme = localStorage.getItem('lumiveil-theme') || 'dark';
+if (savedTheme === 'light') {
+  document.documentElement.setAttribute('data-theme', 'light');
+  toggleText.textContent = 'Dark mode';
+} else {
+  document.documentElement.removeAttribute('data-theme');
   toggleText.textContent = 'Light mode';
-  toggleIcon.textContent = '☀️';
 }
 
 themeToggle.addEventListener('click', function() {
   const current = document.documentElement.getAttribute('data-theme');
-  if (current === 'dark') {
+  if (current === 'light') {
     document.documentElement.removeAttribute('data-theme');
-    toggleText.textContent = 'Dark mode';
-    toggleIcon.textContent = '🌙';
-    localStorage.setItem('lumiveil-theme', 'light');
-  } else {
-    document.documentElement.setAttribute('data-theme', 'dark');
     toggleText.textContent = 'Light mode';
-    toggleIcon.textContent = '☀️';
     localStorage.setItem('lumiveil-theme', 'dark');
+  } else {
+    document.documentElement.setAttribute('data-theme', 'light');
+    toggleText.textContent = 'Dark mode';
+    localStorage.setItem('lumiveil-theme', 'light');
   }
 });
 
@@ -136,28 +137,54 @@ document.addEventListener('DOMContentLoaded', function () {
     searchBtn.disabled = true;
     searchBtn.textContent = 'Analyzing...';
 
-    fetch('http://localhost:5000/analyze', {
-      method: 'POST',
-      headers: {
+    // Pull token from storage so usage is tracked for logged-in users
+    chrome.storage.local.get(['lv_token'], function (sessionData) {
+      const headers = {
         'Content-Type': 'application/json',
         'X-API-Key': 'lumiveil-secret-2026'
-      },
-      body: JSON.stringify({ input: input.trim() })
-    })
-    .then(response => response.json())
-    .then(data => {
-      chrome.storage.local.set({ lastResult: data });
-      searchBtn.disabled = false;
-      searchBtn.textContent = 'Analyze';
-      displayResults(data);
-    })
-    .catch(error => {
-      loadingState.classList.remove('visible');
-      searchBtn.disabled = false;
-      searchBtn.textContent = 'Analyze';
-      emptyState.style.display = 'block';
-      emptyState.querySelector('h2').textContent = 'Could not connect to backend';
-      emptyState.querySelector('p').textContent = 'Make sure the LumiVeil backend is running.';
+      };
+      if (sessionData.lv_token) {
+        headers['Authorization'] = 'Bearer ' + sessionData.lv_token;
+      }
+
+      fetch('http://localhost:5000/api/v1/analyze', {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify({ input: input.trim() })
+      })
+      .then(function(response) {
+        return response.json().then(function(d) { return { status: response.status, data: d }; });
+      })
+      .then(function({ status, data }) {
+        searchBtn.disabled = false;
+        searchBtn.textContent = 'Analyze';
+
+        if (status === 429) {
+          loadingState.classList.remove('visible');
+          emptyState.style.display = 'block';
+          emptyState.querySelector('h2').textContent = 'Daily limit reached';
+          emptyState.querySelector('p').textContent = data.reason || 'Upgrade to Pro for more analyses.';
+          return;
+        }
+        if (status === 403) {
+          loadingState.classList.remove('visible');
+          emptyState.style.display = 'block';
+          emptyState.querySelector('h2').textContent = 'Pro feature';
+          emptyState.querySelector('p').textContent = data.reason || 'Image analysis requires a Pro plan.';
+          return;
+        }
+
+        chrome.storage.local.set({ lastResult: data });
+        displayResults(data);
+      })
+      .catch(function() {
+        loadingState.classList.remove('visible');
+        searchBtn.disabled = false;
+        searchBtn.textContent = 'Analyze';
+        emptyState.style.display = 'block';
+        emptyState.querySelector('h2').textContent = 'Could not connect to backend';
+        emptyState.querySelector('p').textContent = 'Make sure the LumiVeil backend is running.';
+      });
     });
   }
 

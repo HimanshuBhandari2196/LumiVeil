@@ -1,35 +1,57 @@
-from flask import Flask, request, jsonify, abort
+"""
+LumiVeil — Backend API
+======================
+Flask backend for fake news, misinformation, and AI-image detection.
+
+Structure
+---------
+  1. Imports & config
+  2. Security helpers     (API key validation, input sanitisation)
+  3. Image analysis layer (provider abstraction — swap Sightengine ↔ Hive via .env)
+  4. Content analysis     (URL credibility, sensationalism, scoring)
+  5. Routes              (/api/v1/analyze, /api/v1/health)
+  6. Entry point
+
+Adding a new image-analysis provider
+-------------------------------------
+  1. Add its credentials to .env + .env.example
+  2. Load them in the "Provider credentials" section below
+  3. Write  _analyze_with_<name>(image_url) -> (penalty: int|None, flags: list[str])
+  4. Add an elif branch inside analyze_image()
+  5. Set  IMAGE_ANALYSIS_PROVIDER=<name>  in .env
+"""
+
+# ===========================================================================
+# 1. IMPORTS & CONFIG
+# ===========================================================================
+
+from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-import requests
+import requests as http_requests
 from bs4 import BeautifulSoup
-import re
 import secrets
 import hashlib
-import base64
 import io
 from PIL import Image
-import json
 import os
 from dotenv import load_dotenv
 
-# ---- LOAD ENVIRONMENT VARIABLES ----
-# Reads secrets from a local .env file (never committed to Git)
 load_dotenv()
 
 app = Flask(__name__)
 
-# ---- CORS SETUP ----
+# ---- CORS ----
 CORS(app, resources={
-    r"/*": {
+    r"/api/*": {
         "origins": "*",
         "allow_headers": ["Content-Type", "X-API-Key"],
         "methods": ["GET", "POST", "OPTIONS"]
     }
 })
 
-# ---- RATE LIMITER SETUP ----
+# ---- RATE LIMITER ----
 limiter = Limiter(
     key_func=get_remote_address,
     app=app,
@@ -38,321 +60,362 @@ limiter = Limiter(
     strategy="fixed-window"
 )
 
-# ---- API KEY ----
-# Loaded from environment variables — see .env.example for setup
-API_KEY = os.environ.get('LUMIVEIL_API_KEY', 'change-this-in-your-env-file')
-API_KEY_HASH = hashlib.sha256(API_KEY.encode()).hexdigest()
+# ---- LUMIVEIL INTERNAL API KEY ----
+# Used to authenticate requests from the extension to this backend.
+# Set LUMIVEIL_API_KEY in .env — see .env.example.
+_API_KEY      = os.environ.get('LUMIVEIL_API_KEY', 'change-this-in-your-env-file')
+_API_KEY_HASH = hashlib.sha256(_API_KEY.encode()).hexdigest()
 
-# ---- HIVE API KEY ----
-HIVE_API_KEY = os.environ.get('HIVE_API_KEY', '')
+# ---- IMAGE ANALYSIS PROVIDER ----
+# Change IMAGE_ANALYSIS_PROVIDER in .env to switch providers.
+# Supported now: 'sightengine'
+# Ready to enable: 'hive'  (uncomment the Hive section below + .env creds)
+IMAGE_ANALYSIS_PROVIDER = os.environ.get('IMAGE_ANALYSIS_PROVIDER', 'sightengine')
 
-# ---- SECURITY HELPERS ----
+# Provider credentials
+SIGHTENGINE_API_USER   = os.environ.get('SIGHTENGINE_API_USER', '')
+SIGHTENGINE_API_SECRET = os.environ.get('SIGHTENGINE_API_SECRET', '')
+# HIVE_API_KEY         = os.environ.get('HIVE_API_KEY', '')   # uncomment for Hive
 
-def validate_api_key(request):
-    """Check if request has valid API key"""
-    key = request.headers.get('X-API-Key')
+
+# ===========================================================================
+# 2. SECURITY HELPERS
+# ===========================================================================
+
+def _validate_api_key(req):
+    """Constant-time comparison of the X-API-Key header against the stored hash."""
+    key = req.headers.get('X-API-Key', '')
     if not key:
         return False
-    key_hash = hashlib.sha256(key.encode()).hexdigest()
-    return secrets.compare_digest(key_hash, API_KEY_HASH)
+    return secrets.compare_digest(
+        hashlib.sha256(key.encode()).hexdigest(),
+        _API_KEY_HASH
+    )
 
-def validate_input(user_input):
-    """Validate and sanitize user input"""
-    errors = []
 
-    # Check if empty
-    if not user_input or user_input.strip() == '':
-        errors.append('Input cannot be empty')
-        return False, errors
+def _validate_input(user_input):
+    """Basic length and injection-pattern checks.
+    Returns (is_valid: bool, errors: list[str]).
+    """
+    if not user_input or not user_input.strip():
+        return False, ['Input cannot be empty']
 
-    # Check length — max 5000 characters
     if len(user_input) > 5000:
-        errors.append('Input too long — maximum 5000 characters')
-        return False, errors
+        return False, ['Input too long — maximum 5000 characters']
 
-    # Check for suspicious code injection patterns
-    suspicious_patterns = [
-        '<script', 'javascript:', 'eval(',
-        'exec(', 'import os', 'subprocess',
-        '__import__', 'DROP TABLE', 'SELECT *',
-        'INSERT INTO', 'DELETE FROM'
+    injection_patterns = [
+        '<script', 'javascript:', 'eval(', 'exec(',
+        'import os', 'subprocess', '__import__',
+        'DROP TABLE', 'SELECT *', 'INSERT INTO', 'DELETE FROM'
     ]
-
-    input_lower = user_input.lower()
-    for pattern in suspicious_patterns:
-        if pattern.lower() in input_lower:
-            errors.append(f'Suspicious content detected in input')
-            return False, errors
+    lower = user_input.lower()
+    for pattern in injection_patterns:
+        if pattern.lower() in lower:
+            return False, ['Suspicious content detected in input']
 
     return True, []
 
+
 @app.after_request
-def add_security_headers(response):
-    """Add security headers to every response"""
+def _security_headers(response):
+    """Attach security headers to every response."""
     response.headers['Access-Control-Allow-Private-Network'] = 'true'
-    response.headers['Access-Control-Allow-Origin'] = '*'
-    response.headers['X-Content-Type-Options'] = 'nosniff'
-    response.headers['X-Frame-Options'] = 'DENY'
-    response.headers['X-XSS-Protection'] = '1; mode=block'
+    response.headers['Access-Control-Allow-Origin']          = '*'
+    response.headers['X-Content-Type-Options']               = 'nosniff'
+    response.headers['X-Frame-Options']                      = 'DENY'
+    response.headers['X-XSS-Protection']                     = '1; mode=block'
     return response
 
-# ---- HELPER FUNCTIONS ----
 
-def fetch_page_text(url):
-    """Fetch and extract text from a URL"""
+# ===========================================================================
+# 3. IMAGE ANALYSIS — PROVIDER ABSTRACTION
+# ===========================================================================
+# Every provider function must return:
+#   penalty (int | None)  — points deducted from trust score; None = provider error
+#   flags   (list[str])   — human-readable results shown in the full report
+
+def _parse_image_scores(ai_score, deepfake_score):
+    """
+    Shared threshold logic used by every provider.
+    Centralised so tuning thresholds here affects all backends at once.
+    """
+    flags        = []
+    penalty      = 0
+
+    # AI-generated image
+    if ai_score > 0.7:
+        flags.append(f'❌ Image appears to be AI generated (confidence: {int(ai_score * 100)}%)')
+        penalty += 40
+    elif ai_score > 0.4:
+        flags.append(f'⚠️ Image may be AI generated (confidence: {int(ai_score * 100)}%)')
+        penalty += 20
+    else:
+        flags.append(f'✅ Image does not appear to be AI generated (confidence: {int((1 - ai_score) * 100)}%)')
+
+    # Deepfake
+    if deepfake_score > 0.7:
+        flags.append(f'❌ Deepfake detected (confidence: {int(deepfake_score * 100)}%)')
+        penalty += 50
+    elif deepfake_score > 0.4:
+        flags.append(f'⚠️ Possible deepfake detected (confidence: {int(deepfake_score * 100)}%)')
+        penalty += 25
+    else:
+        flags.append(f'✅ No deepfake detected (confidence: {int((1 - deepfake_score) * 100)}%)')
+
+    return penalty, flags
+
+
+# ---------------------------------------------------------------------------
+# Provider: Sightengine (active default)
+# Docs: https://sightengine.com/docs/ai-generated-image-detection
+#       https://sightengine.com/docs/deepfake-detection
+# ---------------------------------------------------------------------------
+
+def _analyze_with_sightengine(image_url):
+    if not SIGHTENGINE_API_USER or not SIGHTENGINE_API_SECRET:
+        return None, ['⚠️ Sightengine credentials missing — set SIGHTENGINE_API_USER and SIGHTENGINE_API_SECRET in .env']
+
+    resp = http_requests.get(
+        'https://api.sightengine.com/1.0/check.json',
+        params={
+            'url':        image_url,
+            'models':     'genai,deepfake',
+            'api_user':   SIGHTENGINE_API_USER,
+            'api_secret': SIGHTENGINE_API_SECRET,
+        },
+        timeout=30
+    )
+
+    if resp.status_code != 200:
+        return None, [f'⚠️ Sightengine API error: HTTP {resp.status_code}']
+
+    data = resp.json()
+    if data.get('status') != 'success':
+        return None, ['⚠️ Sightengine returned an unsuccessful response']
+
+    ai_score       = data.get('type', {}).get('ai_generated', 0)
+    deepfake_score = data.get('type', {}).get('deepfake', 0)
+
+    return _parse_image_scores(ai_score, deepfake_score)
+
+
+# ---------------------------------------------------------------------------
+# Provider: Hive (ready to enable — uncomment when you have enterprise access)
+# Docs: https://docs.thehive.ai/docs/visual-content-moderation
+# ---------------------------------------------------------------------------
+#
+# def _analyze_with_hive(image_url):
+#     if not HIVE_API_KEY:
+#         return None, ['⚠️ Hive credentials missing — set HIVE_API_KEY in .env']
+#
+#     resp = http_requests.post(
+#         'https://api.thehive.ai/api/v3/chat/completions',
+#         headers={
+#             'Authorization': f'Bearer {HIVE_API_KEY}',
+#             'Content-Type':  'application/json',
+#         },
+#         json={
+#             'model':      'hive/moderation-11b-vision-language-model',
+#             'max_tokens': 1000,
+#             'messages': [{
+#                 'role': 'user',
+#                 'content': [
+#                     {'type': 'text',      'text': 'Analyze this image for AI generation and deepfakes.'},
+#                     {'type': 'image_url', 'image_url': {'url': image_url}},
+#                 ]
+#             }]
+#         },
+#         timeout=30
+#     )
+#
+#     if resp.status_code != 200:
+#         return None, [f'⚠️ Hive API error: HTTP {resp.status_code}']
+#
+#     content = resp.json().get('choices', [{}])[0].get('message', {}).get('content', '')
+#     # TODO: parse natural-language content string → extract float scores
+#     # then: return _parse_image_scores(ai_score, deepfake_score)
+#     return None, ['⚠️ Hive response parsing not yet implemented']
+
+
+# ---------------------------------------------------------------------------
+# Public dispatcher — the ONLY function the rest of the app calls
+# ---------------------------------------------------------------------------
+
+def analyze_image(image_url):
+    """
+    Route to the correct provider based on IMAGE_ANALYSIS_PROVIDER in .env.
+    Catches all provider-level exceptions so a broken provider never crashes
+    the whole /analyze endpoint.
+    """
+    provider = IMAGE_ANALYSIS_PROVIDER.lower().strip()
     try:
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(url, headers=headers, timeout=10)
-        soup = BeautifulSoup(response.text, 'html.parser')
-        paragraphs = soup.find_all('p')
-        text = ' '.join([p.get_text() for p in paragraphs])
-        return text[:3000]
-    except:
-        return None
-    
+        if provider == 'sightengine':
+            return _analyze_with_sightengine(image_url)
+        # elif provider == 'hive':
+        #     return _analyze_with_hive(image_url)
+        else:
+            return None, [f'⚠️ Unknown provider "{provider}" — check IMAGE_ANALYSIS_PROVIDER in .env']
+    except Exception as exc:
+        return None, [f'⚠️ Image analysis error ({provider}): {exc}']
 
-def analyze_image_with_hive(image_url):
-    """Send image to Hive API for AI/deepfake detection"""
-    try:
-        # Download the image first
-        # Download the image first — mimic a real browser
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Referer': image_url,
-            'Connection': 'keep-alive'
-        }
-        image_response = requests.get(image_url, headers=headers, timeout=15)
-        if image_response.status_code != 200:
-            return None, ['⚠️ Could not download image for analysis']
 
-        # Convert to base64
-        image_data = base64.b64encode(image_response.content).decode('utf-8')
-
-        # Send to Hive API
-        hive_response = requests.post(
-            'https://api.thehive.ai/api/v2/task/sync',
-            headers={
-                'Authorization': f'Token {HIVE_API_KEY}',
-                'Content-Type': 'application/json'
-            },
-            json={
-                'image': image_data
-            },
-            timeout=30
-        )
-
-        if hive_response.status_code != 200:
-            return None, ['⚠️ Hive API returned an error']
-
-        data = hive_response.json()
-        flags = []
-        score_penalty = 0
-
-        # Parse Hive response
-        if 'status' in data and len(data['status']) > 0:
-            classes = data['status'][0].get('response', {}).get('output', [{}])[0].get('classes', [])
-
-            for cls in classes:
-                name = cls.get('class', '')
-                score = cls.get('score', 0)
-
-                # AI generated image detection
-                if name == 'ai_generated' and score > 0.7:
-                    flags.append(f'❌ Image appears to be AI generated (confidence: {int(score*100)}%)')
-                    score_penalty += 40
-
-                elif name == 'ai_generated' and score > 0.4:
-                    flags.append(f'⚠️ Image may be AI generated (confidence: {int(score*100)}%)')
-                    score_penalty += 20
-
-                # Deepfake detection
-                if name == 'deepfake' and score > 0.7:
-                    flags.append(f'❌ Deepfake detected (confidence: {int(score*100)}%)')
-                    score_penalty += 50
-
-                elif name == 'deepfake' and score > 0.4:
-                    flags.append(f'⚠️ Possible deepfake detected (confidence: {int(score*100)}%)')
-                    score_penalty += 25
-
-        if not flags:
-            flags.append('✅ No AI generation or deepfake detected by Hive')
-
-        return score_penalty, flags
-
-    except Exception as e:
-        return None, [f'⚠️ Image analysis error: {str(e)}']
-
+# ---------------------------------------------------------------------------
+# EXIF metadata analysis (provider-independent)
+# ---------------------------------------------------------------------------
 
 def analyze_image_metadata(image_url):
-    """Analyze image metadata for suspicious patterns"""
+    """Download image and inspect EXIF metadata for manipulation signals."""
     try:
-        # Download image — mimic a real browser
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
+            'User-Agent':      'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+            'Accept':          'image/webp,image/apng,image/*,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.9',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Referer': image_url,
-            'Connection': 'keep-alive'
+            'Referer':         image_url,
         }
-        image_response = requests.get(image_url, headers=headers, timeout=15)
-        if image_response.status_code != 200:
+        img_resp = http_requests.get(image_url, headers=headers, timeout=15)
+        if img_resp.status_code != 200:
             return 0, ['⚠️ Could not download image for metadata analysis']
 
-        # Open with Pillow
-        img = Image.open(io.BytesIO(image_response.content))
-        flags = []
-        score_penalty = 0
+        img     = Image.open(io.BytesIO(img_resp.content))
+        flags   = []
+        penalty = 0
 
-        # Check for EXIF data
-        exif_data = img._getexif() if hasattr(img, '_getexif') else None
+        exif = img._getexif() if hasattr(img, '_getexif') else None
 
-        if exif_data is None:
-            flags.append('⚠️ No metadata found — image may have been edited or screenshot')
-            score_penalty += 10
+        if exif is None:
+            flags.append('⚠️ No EXIF metadata — image may have been edited or screenshotted')
+            penalty += 10
         else:
-            # Check for software tag — indicates editing
-            software = exif_data.get(305, '')
+            software = exif.get(305, '')
             if software:
-                suspicious_software = [
+                suspicious_sw = [
                     'photoshop', 'gimp', 'lightroom',
-                    'stable diffusion', 'midjourney',
-                    'dall-e', 'firefly', 'canva'
+                    'stable diffusion', 'midjourney', 'dall-e', 'firefly', 'canva'
                 ]
-                for sw in suspicious_software:
-                    if sw.lower() in software.lower():
-                        flags.append(f'❌ Image was edited with: {software}')
-                        score_penalty += 20
-                        break
+                if any(s in software.lower() for s in suspicious_sw):
+                    flags.append(f'❌ Image edited with suspicious software: {software}')
+                    penalty += 20
                 else:
                     flags.append(f'✅ Image software: {software}')
 
-            # Check GPS data — real news photos often have location
-            gps_info = exif_data.get(34853, None)
-            if gps_info:
+            if exif.get(34853):
                 flags.append('✅ GPS metadata present — location data exists')
             else:
                 flags.append('⚠️ No GPS data found in image')
 
-            # Check date taken
-            date_taken = exif_data.get(36867, None)
+            date_taken = exif.get(36867)
             if date_taken:
                 flags.append(f'✅ Photo taken: {date_taken}')
             else:
-                flags.append('⚠️ No date taken found in metadata')
+                flags.append('⚠️ No date taken in metadata')
 
-        # Check image format
-        img_format = img.format
-        img_mode = img.mode
-        flags.append(f'✅ Image format: {img_format}, Mode: {img_mode}')
+        flags.append(f'✅ Image format: {img.format}, mode: {img.mode}')
+        return penalty, flags
 
-        return score_penalty, flags
+    except Exception as exc:
+        return 0, [f'⚠️ Metadata analysis error: {exc}']
 
-    except Exception as e:
-        return 0, [f'⚠️ Metadata analysis error: {str(e)}']
+
+# ===========================================================================
+# 4. CONTENT ANALYSIS
+# ===========================================================================
+
+def fetch_page_text(url):
+    """Fetch visible paragraph text from a URL (max 3000 chars)."""
+    try:
+        resp = http_requests.get(
+            url,
+            headers={'User-Agent': 'Mozilla/5.0'},
+            timeout=10
+        )
+        soup = BeautifulSoup(resp.text, 'html.parser')
+        text = ' '.join(p.get_text() for p in soup.find_all('p'))
+        return text[:3000]
+    except Exception:
+        return None
+
 
 def check_url_credibility(url):
-    """Check if the URL is from a known credible source"""
+    """
+    Score a URL against regional trusted-domain lists, known fake-news
+    domains, social media platforms, and suspicious URL patterns.
+    Returns (score: int, flags: list[str]).
+    """
 
-
-    # ---- GLOBAL SOURCES ---- always checked regardless of location
+    # -- Trusted domains by region --
     global_credible = [
-        # International News
-        'reuters.com', 'apnews.com', 'bbc.com',
-        'theguardian.com', 'aljazeera.com',
-        'dw.com', 'france24.com', 'euronews.com',
-        # Science and Research
+        'reuters.com', 'apnews.com', 'bbc.com', 'theguardian.com',
+        'aljazeera.com', 'dw.com', 'france24.com', 'euronews.com',
         'nature.com', 'science.org', 'scientificamerican.com',
         'newscientist.com', 'arxiv.org', 'pubmed.ncbi.nlm.nih.gov',
-        # International Organizations
         'who.int', 'un.org', 'unesco.org', 'unicef.org',
         'worldbank.org', 'imf.org', 'nato.int',
-        # Fact Checking
         'snopes.com', 'factcheck.org', 'politifact.com',
         'fullfact.org', 'boomlive.in', 'altnews.in',
-        'thelogicalindian.com', 'vishvasnews.com'
+        'thelogicalindian.com', 'vishvasnews.com',
     ]
-
-    # ---- INDIA SOURCES ----
     india_credible = [
-        # Major News
         'ndtv.com', 'thehindu.com', 'hindustantimes.com',
         'indianexpress.com', 'timesofindia.com', 'livemint.com',
         'thewire.in', 'scroll.in', 'theprint.in',
         'businessstandard.com', 'economictimes.indiatimes.com',
-        # TV Channels
         'aajtak.in', 'abplive.com', 'zeenews.india.com',
         'news18.com', 'republicworld.com', 'wionews.com',
-        # Government
         'pib.gov.in', 'india.gov.in', 'mygov.in',
-        'isro.gov.in', 'rbi.org.in'
+        'isro.gov.in', 'rbi.org.in',
     ]
-
-    # ---- USA SOURCES ----
     usa_credible = [
-        # Major News
         'nytimes.com', 'washingtonpost.com', 'wsj.com',
         'usatoday.com', 'newsweek.com', 'time.com',
         'theatlantic.com', 'npr.org', 'pbs.org',
         'abcnews.go.com', 'cbsnews.com', 'nbcnews.com',
         'foxnews.com', 'cnn.com', 'msnbc.com',
-        # Government
         'nasa.gov', 'nih.gov', 'cdc.gov', 'fda.gov',
-        'whitehouse.gov', 'congress.gov', 'supremecourt.gov'
+        'whitehouse.gov', 'congress.gov', 'supremecourt.gov',
     ]
-
-    # ---- UK SOURCES ----
     uk_credible = [
-        'bbc.co.uk', 'theguardian.com', 'thetimes.co.uk',
-        'telegraph.co.uk', 'independent.co.uk', 'mirror.co.uk',
-        'dailymail.co.uk', 'sky.com', 'itv.com',
-        'gov.uk', 'parliament.uk'
+        'bbc.co.uk', 'thetimes.co.uk', 'telegraph.co.uk',
+        'independent.co.uk', 'mirror.co.uk', 'dailymail.co.uk',
+        'sky.com', 'itv.com', 'gov.uk', 'parliament.uk',
     ]
-
-    # ---- EUROPE SOURCES ----
     europe_credible = [
-        'spiegel.de', 'lemonde.fr', 'lefigaro.fr',
-        'elpais.com', 'corriere.it', 'nrc.nl',
-        'svt.se', 'yle.fi', 'rte.ie',
-        'europa.eu', 'ecb.europa.eu'
+        'spiegel.de', 'lemonde.fr', 'lefigaro.fr', 'elpais.com',
+        'corriere.it', 'nrc.nl', 'svt.se', 'yle.fi', 'rte.ie',
+        'europa.eu', 'ecb.europa.eu',
     ]
-
-    # ---- MIDDLE EAST AND AFRICA SOURCES ----
     mea_credible = [
-        'aljazeera.com', 'alarabiya.net', 'thenationalnews.com',
-        'timesofisrael.com', 'haaretz.com', 'dailymaverick.co.za',
-        'nation.africa', 'theafricareport.com'
+        'alarabiya.net', 'thenationalnews.com', 'timesofisrael.com',
+        'haaretz.com', 'dailymaverick.co.za',
+        'nation.africa', 'theafricareport.com',
     ]
-
-    # ---- ASIA PACIFIC SOURCES ----
     asia_credible = [
         'scmp.com', 'straitstimes.com', 'japantimes.co.jp',
         'koreaherald.com', 'abc.net.au', 'nzherald.co.nz',
-        'channelnewsasia.com', 'bangkokpost.com'
+        'channelnewsasia.com', 'bangkokpost.com',
     ]
 
-    # ---- SOCIAL MEDIA PLATFORMS ----
-    # We don't trust or distrust these — we just note them
+    all_credible = (
+        global_credible + india_credible + usa_credible +
+        uk_credible + europe_credible + mea_credible + asia_credible
+    )
+
+    # -- Social media: neutral note, slight penalty --
     social_media = [
-        'twitter.com', 'x.com', 'facebook.com',
-        'instagram.com', 'linkedin.com', 'reddit.com',
-        'youtube.com', 'tiktok.com', 'telegram.org',
-        'whatsapp.com', 'pinterest.com', 'snapchat.com'
+        'twitter.com', 'x.com', 'facebook.com', 'instagram.com',
+        'linkedin.com', 'reddit.com', 'youtube.com', 'tiktok.com',
+        'telegram.org', 'whatsapp.com', 'pinterest.com', 'snapchat.com',
     ]
 
-    # ---- KNOWN FAKE NEWS DOMAINS ----
+    # -- Known fake-news domains --
     known_fake = [
         'beforeitsnews.com', 'naturalnews.com', 'infowars.com',
         'worldnewsdailyreport.com', 'empirenews.net',
         'nationalreport.net', 'abcnews.com.co',
         'theonion.com', 'clickhole.com', 'waterfordwhispersnews.com',
-        'dailybuzzlive.com', 'huzlers.com', 'thepinacoladepress.com'
+        'dailybuzzlive.com', 'huzlers.com', 'thepinacoladepress.com',
     ]
 
-    # ---- SUSPICIOUS URL PATTERNS ----
+    # -- Suspicious path/slug patterns --
     suspicious_patterns = [
         'breaking-news', 'viral', 'exclusive-leaked',
         'truth-revealed', 'they-dont-want-you',
@@ -360,333 +423,291 @@ def check_url_credibility(url):
         'banned-video', 'censored', 'deep-state',
         'new-world-order', 'illuminati', 'false-flag',
         'mainstream-media-wont', 'suppressed-news',
-        'wake-up-sheeple', 'crisis-actor'
+        'wake-up-sheeple', 'crisis-actor',
     ]
 
-    # ---- COMBINE ALL CREDIBLE SOURCES ----
-    all_credible = (
-        global_credible + india_credible + usa_credible +
-        uk_credible + europe_credible + mea_credible + asia_credible
-    )
+    score    = 50
+    flags    = []
+    url_low  = url.lower()
 
-    score = 50
-    flags = []
-    url_lower = url.lower()
-
-    # Check known fake domains first
+    # Known fake domain — early return
     for domain in known_fake:
-        if domain in url_lower:
+        if domain in url_low:
             score -= 40
-            flags.append(f'❌ Known fake news domain detected: {domain}')
+            flags.append(f'❌ Known fake-news domain: {domain}')
             return max(0, score), flags
 
-    # Check social media
+    # Social media note
     for platform in social_media:
-        if platform in url_lower:
-            flags.append(f'⚠️ Content is from social media: {platform} — verify with news sources')
+        if platform in url_low:
+            flags.append(f'⚠️ Content from social media ({platform}) — verify with a news source')
             score -= 5
             break
 
-    # Check credible domains
+    # Trusted domain check
     matched = False
     for domain in all_credible:
-        if domain in url_lower:
-            score += 30
-            flags.append(f'✅ Source is from trusted domain: {domain}')
+        if domain in url_low:
+            score  += 30
+            flags.append(f'✅ Trusted domain: {domain}')
             matched = True
             break
-
     if not matched:
-        flags.append('⚠️ Source domain is not in our trusted list')
+        flags.append('⚠️ Domain not in our trusted list')
         score -= 10
 
-    # Check suspicious URL patterns
+    # Suspicious URL patterns
     for pattern in suspicious_patterns:
-        if pattern in url_lower:
+        if pattern in url_low:
             score -= 15
-            flags.append(f'❌ Suspicious URL pattern detected: {pattern}')
+            flags.append(f'❌ Suspicious URL pattern: "{pattern}"')
 
     return max(0, min(100, score)), flags
 
+
 def check_sensationalism(text):
-    """Check if the text uses sensational language"""
+    """
+    Scan text for sensational / misinformation language patterns.
+    Returns (count: int, flags: list[str]).
+    """
     sensational_words = [
-        # Urgency and Fear
-        'shocking', 'terrifying', 'horrifying', 'disturbing',
-        'alarming', 'devastating', 'catastrophic', 'emergency',
-        'crisis', 'panic', 'chaos', 'mayhem', 'disaster',
-
-        # Conspiracy Language
+        # Urgency & fear
+        'shocking', 'terrifying', 'horrifying', 'disturbing', 'alarming',
+        'devastating', 'catastrophic', 'emergency', 'crisis', 'panic',
+        'chaos', 'mayhem', 'disaster',
+        # Conspiracy
         'they dont want you to know', 'secret revealed',
-        'what mainstream media wont tell', 'suppressed',
-        'censored', 'banned', 'deep state', 'new world order',
-        'illuminati', 'false flag', 'crisis actor', 'wake up',
-        'sheeple', 'shadow government', 'they are hiding',
-        'cover up', 'coverup', 'truth they hide',
-
-        # Clickbait Language
-        'explosive', 'bombshell', 'leaked', 'exclusive',
-        'breaking', 'viral', 'exposed', 'miracle',
-        'hoax', 'conspiracy', 'you wont believe',
-        'mind blowing', 'mind-blowing', 'jaw dropping',
-        'jaw-dropping', 'game changer', 'game-changer',
+        'what mainstream media wont tell', 'suppressed', 'censored',
+        'banned', 'deep state', 'new world order', 'illuminati',
+        'false flag', 'crisis actor', 'wake up', 'sheeple',
+        'shadow government', 'they are hiding', 'cover up', 'coverup',
+        # Clickbait
+        'explosive', 'bombshell', 'leaked', 'exclusive', 'breaking',
+        'viral', 'exposed', 'miracle', 'hoax', 'conspiracy',
+        'you wont believe', 'mind blowing', 'mind-blowing',
+        'jaw dropping', 'jaw-dropping', 'game changer', 'game-changer',
         'this changes everything', 'nothing will be the same',
         'share before deleted', 'share before they delete',
         'watch before removed', 'watch before banned',
-
-        # Medical Misinformation
-        'miracle cure', 'doctors dont want you',
-        'big pharma hiding', 'natural cure banned',
-        'cancer cure suppressed', 'doctors exposed',
-        'vaccine kills', 'poison in', 'toxins in',
-        'detox miracle', 'cure for everything',
-        'big pharma doesnt want', 'medical establishment hiding',
-
-        # Political Manipulation
-        'election stolen', 'voter fraud proof',
-        'rigged election', 'deep state plot',
-        'globalist agenda', 'socialist takeover',
-        'communist infiltration', 'radical left',
-        'extreme right', 'they are replacing',
-        'great replacement', 'population control',
-
-        # Financial Misinformation  
-        'get rich quick', 'make money fast',
-        'guaranteed returns', 'risk free investment',
-        'bitcoin millionaire', 'secret investment',
+        # Medical misinformation
+        'miracle cure', 'doctors dont want you', 'big pharma hiding',
+        'natural cure banned', 'cancer cure suppressed', 'doctors exposed',
+        'vaccine kills', 'poison in', 'toxins in', 'detox miracle',
+        'cure for everything', 'big pharma doesnt want',
+        'medical establishment hiding',
+        # Political manipulation
+        'election stolen', 'voter fraud proof', 'rigged election',
+        'deep state plot', 'globalist agenda', 'socialist takeover',
+        'communist infiltration', 'radical left', 'extreme right',
+        'they are replacing', 'great replacement', 'population control',
+        # Financial misinformation
+        'get rich quick', 'make money fast', 'guaranteed returns',
+        'risk free investment', 'bitcoin millionaire', 'secret investment',
         'banks dont want you', 'financial secret',
         'retire in 30 days', 'unlimited income',
-
-        # Religious and Cultural Manipulation
+        # Religious / apocalyptic manipulation
         'end times', 'apocalypse now', 'prophecy fulfilled',
         'sign of the end', 'biblical prophecy',
         'god told me', 'divine revelation exclusive',
-
-        # Fake Credibility Signals
-        'scientists baffled', 'doctors stunned',
-        'experts shocked', 'government admits',
-        'finally admitted', 'officially confirmed',
+        # Fake credibility signals
+        'scientists baffled', 'doctors stunned', 'experts shocked',
+        'government admits', 'finally admitted', 'officially confirmed',
         'leaked documents prove', 'insider reveals',
         'whistleblower exposes', 'anonymous source confirms',
-
-        # Emotional Manipulation
+        # Emotional manipulation
         'will make you cry', 'will restore your faith',
         'will make you sick', 'will make you angry',
         'will shock you', 'prepare to be amazed',
         'you need to see this', 'everyone is talking about',
-        'the truth is out', 'finally the truth'
+        'the truth is out', 'finally the truth',
     ]
 
-    score = 0
-    flags = []
-    text_lower = text.lower()
+    count    = 0
+    flags    = []
+    text_low = text.lower()
 
-    for word in sensational_words:
-        if word in text_lower:
-            score += 1
-            flags.append(f'❌ Sensational language detected: "{word}"')
+    for phrase in sensational_words:
+        if phrase in text_low:
+            count += 1
+            flags.append(f'❌ Sensational language: "{phrase}"')
 
-    # Count excessive caps
     caps_ratio = sum(1 for c in text if c.isupper()) / max(len(text), 1)
     if caps_ratio > 0.3:
-        score += 2
-        flags.append('❌ Excessive capital letters detected')
+        count += 2
+        flags.append('❌ Excessive capital letters')
 
-    # Count exclamation marks
     exclamations = text.count('!')
     if exclamations > 3:
-        score += 1
-        flags.append(f'❌ Excessive exclamation marks: {exclamations} found')
+        count += 1
+        flags.append(f'❌ Excessive exclamation marks ({exclamations} found)')
 
-    return score, flags
+    return count, flags
 
-def fact_check_with_google(query):
-    """Search Google Fact Check API"""
-    try:
-        api_url = f'https://factchecktools.googleapis.com/v1alpha1/claims:search?query={query}&key=YOUR_API_KEY'
-        response = requests.get(api_url, timeout=10)
-        data = response.json()
-        if 'claims' in data and len(data['claims']) > 0:
-            claim = data['claims'][0]
-            return f"Fact check found: {claim.get('text', 'No details')}"
-        return None
-    except:
-        return None
 
 def calculate_final_score(url_score, sensational_count, flags):
-    """Calculate the final trust score with weighted factors"""
-
+    """
+    Combine URL score, sensationalism penalty, and flag-based bonuses/penalties
+    into a final 0-100 trust score.
+    """
     score = url_score
 
-    # ---- SENSATIONALISM PENALTY ----
-    # More sensational words = exponentially worse
-    if sensational_count == 0:
-        pass  # No penalty
-    elif sensational_count <= 2:
-        score -= (sensational_count * 5)  # Mild penalty
+    # Sensationalism penalty (exponential)
+    if sensational_count <= 2:
+        score -= sensational_count * 5
     elif sensational_count <= 5:
-        score -= (sensational_count * 8)  # Moderate penalty
+        score -= sensational_count * 8
     else:
-        score -= (sensational_count * 12)  # Heavy penalty
+        score -= sensational_count * 12
 
-    # ---- FLAG BASED PENALTIES ----
+    # Flag-based adjustments
+    fact_checkers = [
+        'snopes.com', 'factcheck.org', 'politifact.com',
+        'boomlive.in', 'altnews.in', 'fullfact.org',
+    ]
     for flag in flags:
-        # Known fake domain is an instant heavy penalty
-        if 'Known fake news domain' in flag:
-            score -= 50
+        if 'Known fake-news domain'        in flag: score -= 50
+        if 'Suspicious URL pattern'        in flag: score -= 10
+        if 'Excessive capital letters'     in flag: score -= 8
+        if 'Excessive exclamation marks'   in flag: score -= 8
+        if 'social media'                  in flag: score -= 5
+        if 'Trusted domain'                in flag: score += 10
+        if any(fc in flag for fc in fact_checkers): score += 15
+        if any(ext in flag for ext in ['.gov', '.edu', '.org']): score += 5
 
-        # Suspicious URL patterns
-        if 'Suspicious URL pattern' in flag:
-            score -= 10
+    return max(0, min(100, score))
 
-        # Excessive caps
-        if 'Excessive capital letters' in flag:
-            score -= 8
-
-        # Excessive exclamation marks
-        if 'Excessive exclamation marks' in flag:
-            score -= 8
-
-        # Social media source
-        if 'social media' in flag:
-            score -= 5
-
-    # ---- POSITIVE SIGNALS ----
-    for flag in flags:
-        # Trusted domain is a strong positive signal
-        if 'trusted domain' in flag:
-            score += 10
-
-        # Fact checking sites get extra boost
-        fact_checkers = [
-            'snopes.com', 'factcheck.org', 'politifact.com',
-            'boomlive.in', 'altnews.in', 'fullfact.org'
-        ]
-        for fc in fact_checkers:
-            if fc in flag:
-                score += 15
-
-        # Government and scientific sources get extra boost
-        trusted_extensions = ['.gov', '.edu', '.org']
-        for ext in trusted_extensions:
-            if ext in flag:
-                score += 5
-
-    # ---- KEEP WITHIN 0-100 ----
-    score = max(0, min(100, score))
-    return score
 
 def get_verdict(score):
-    """Get verdict based on score"""
-    if score >= 70:
-        return 'real'
-    elif score >= 40:
-        return 'mixed'
-    else:
-        return 'fake'
+    if score >= 70: return 'real'
+    if score >= 40: return 'mixed'
+    return 'fake'
 
-# ---- MAIN ROUTE ----
 
-@app.route('/analyze', methods=['POST'])
+# ===========================================================================
+# 5. ROUTES
+# ===========================================================================
+
+@app.route('/api/v1/health', methods=['GET'])
+def health():
+    """Simple health-check endpoint — no auth required."""
+    return jsonify({
+        'status': 'ok',
+        'provider': IMAGE_ANALYSIS_PROVIDER,
+        'version': '1.0.0'
+    })
+
+
+@app.route('/api/v1/analyze', methods=['POST'])
 @limiter.limit("10 per minute")
 def analyze():
+    """
+    Main analysis endpoint.
 
-    # ---- VALIDATE API KEY ----
-    if not validate_api_key(request):
-        return jsonify({
-            'error': 'Unauthorized — Invalid or missing API key'
-        }), 401
+    Request body (JSON):
+        { "input": "<url | image-url | plain text claim>" }
 
-    # ---- VALIDATE INPUT ----
-    data = request.get_json()
-    if not data:
-        return jsonify({'error': 'No data provided'}), 400
+    Headers:
+        X-API-Key: <LUMIVEIL_API_KEY>
 
-    user_input = data.get('input', '')
-    is_valid, errors = validate_input(user_input)
+    Response (JSON):
+        {
+            "verdict":     "real" | "mixed" | "fake",
+            "trust_score": 0-100,
+            "summary":     "...",
+            "checks":      ["...", ...],
+            "real_info":   "...",
+            "sources":     ["...", ...]
+        }
+    """
 
-    if not is_valid:
-        return jsonify({
-            'error': 'Invalid input',
-            'details': errors
-        }), 400
+    # -- Auth --
+    if not _validate_api_key(request):
+        return jsonify({'error': 'Unauthorized — invalid or missing API key'}), 401
 
-    all_flags = []
-    url_score = 50
+    # -- Parse body --
+    body = request.get_json(silent=True)
+    if not body:
+        return jsonify({'error': 'Request body must be JSON'}), 400
+
+    user_input = body.get('input', '')
+    valid, errors = _validate_input(user_input)
+    if not valid:
+        return jsonify({'error': 'Invalid input', 'details': errors}), 400
+
+    # -- Classify input type --
+    image_exts = ('.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp')
+    is_url     = user_input.startswith(('http://', 'https://'))
+    is_image   = is_url and user_input.lower().endswith(image_exts)
+
+    all_flags     = []
+    url_score     = 50
     image_penalty = 0
+    sensational_count = 0
 
-    # Check if input is an image URL
-    image_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']
-    is_image = any(user_input.lower().endswith(ext) for ext in image_extensions)
-
-    # Check if input is a URL
-    is_url = user_input.startswith('http://') or user_input.startswith('https://')
-
-    if is_image and is_url:
-        # ---- IMAGE ANALYSIS ----
+    if is_image:
+        # -- Image: AI detection + EXIF metadata --
         all_flags.append('🔍 Image detected — running AI and metadata analysis...')
 
-        # Hive AI detection
-        hive_penalty, hive_flags = analyze_image_with_hive(user_input)
-        all_flags.extend(hive_flags)
-        if hive_penalty:
-            image_penalty += hive_penalty
+        ai_penalty, ai_flags = analyze_image(user_input)
+        all_flags.extend(ai_flags)
+        if ai_penalty:
+            image_penalty += ai_penalty
 
-        # Metadata analysis
         meta_penalty, meta_flags = analyze_image_metadata(user_input)
         all_flags.extend(meta_flags)
         image_penalty += meta_penalty
 
-        # Adjust URL score for images
         url_score = max(0, 70 - image_penalty)
-        sensational_count = 0
 
     elif is_url:
-        # ---- URL ANALYSIS ----
+        # -- URL: credibility check + page-text sensationalism --
         url_score, url_flags = check_url_credibility(user_input)
         all_flags.extend(url_flags)
 
-        # Fetch page content
         page_text = fetch_page_text(user_input)
         if page_text:
-            sensational_count, sensational_flags = check_sensationalism(page_text)
-            all_flags.extend(sensational_flags)
+            sensational_count, sens_flags = check_sensationalism(page_text)
+            all_flags.extend(sens_flags)
         else:
-            sensational_count = 0
-            all_flags.append('⚠️ Could not fetch page content')
+            all_flags.append('⚠️ Could not fetch page content for text analysis')
+
     else:
-        # ---- TEXT ANALYSIS ----
-        sensational_count, sensational_flags = check_sensationalism(user_input)
-        all_flags.extend(sensational_flags)
+        # -- Plain text: sensationalism only --
+        sensational_count, sens_flags = check_sensationalism(user_input)
+        all_flags.extend(sens_flags)
 
-    # Calculate final score
+    # -- Score + verdict --
     final_score = calculate_final_score(url_score, sensational_count, all_flags)
-    verdict = get_verdict(final_score)
+    verdict     = get_verdict(final_score)
 
-    # Build summary
     if verdict == 'fake':
         summary = f'⚠️ This content shows {len(all_flags)} red flags and scores low on our trust meter. Treat with caution.'
     elif verdict == 'real':
         summary = f'✅ This content appears credible with a trust score of {final_score}/100.'
     else:
-        summary = f'⚠️ This content has mixed signals. Verify with trusted sources before sharing.'
+        summary = '⚠️ This content has mixed signals. Verify with trusted sources before sharing.'
 
-    # Build response
     return jsonify({
-        'verdict': verdict,
+        'verdict':     verdict,
         'trust_score': final_score,
-        'summary': summary,
-        'checks': all_flags if all_flags else ['✅ No red flags detected'],
-        'real_info': 'Always cross-check with Reuters, BBC, AP News, or The Hindu for verified information.',
-        'sources': [
-            'reuters.com',
-            'bbc.com',
-            'apnews.com',
-            'thehindu.com',
-            'ndtv.com'
-        ]
+        'summary':     summary,
+        'checks':      all_flags or ['✅ No red flags detected'],
+        'real_info':   'Always cross-check with Reuters, BBC, AP News, or The Hindu for verified information.',
+        'sources':     ['reuters.com', 'bbc.com', 'apnews.com', 'thehindu.com', 'ndtv.com'],
     })
 
-# ---- RUN SERVER ----
+
+# Backward-compatibility alias — old extension code calls /analyze
+# Remove once extension is updated to /api/v1/analyze
+@app.route('/analyze', methods=['POST'])
+@limiter.limit("10 per minute")
+def analyze_legacy():
+    return analyze()
+
+
+# ===========================================================================
+# 6. ENTRY POINT
+# ===========================================================================
+
 if __name__ == '__main__':
     app.run(debug=False, port=5000)
