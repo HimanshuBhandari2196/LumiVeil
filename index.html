@@ -78,6 +78,172 @@
     }
     .nav__cta:hover { background: #6A5FE0; transform: translateY(-1px); }
 
+    .nav__signin {
+      display: inline-flex; align-items: center; gap: 7px;
+      padding: 9px 20px; border-radius: 100px;
+      border: 1px solid var(--border);
+      background: transparent; color: var(--muted);
+      font-size: 14px; font-weight: 500;
+      transition: all 0.2s; cursor: pointer;
+    }
+    .nav__signin:hover { border-color: rgba(255,255,255,0.2); color: var(--text); }
+
+    .nav__right { display: flex; align-items: center; gap: 10px; }
+
+    /* Logged-in state in nav */
+    .nav__user {
+      display: none; align-items: center; gap: 10px;
+    }
+    .nav__user.visible { display: flex; }
+    .nav__tier {
+      font-size: 11px; font-weight: 700; letter-spacing: 0.08em;
+      text-transform: uppercase; padding: 4px 10px; border-radius: 100px;
+      background: rgba(124,111,247,0.15); color: var(--accent);
+      border: 1px solid rgba(124,111,247,0.3);
+    }
+    .nav__token-btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 8px 16px; border-radius: 100px;
+      border: 1px solid rgba(124,111,247,0.35);
+      background: transparent; color: var(--accent);
+      font-size: 13px; font-weight: 500; cursor: pointer;
+      transition: all 0.2s;
+    }
+    .nav__token-btn:hover { background: rgba(124,111,247,0.1); }
+    .nav__signout {
+      font-size: 13px; color: var(--muted); cursor: pointer;
+      transition: color 0.2s; background: none; border: none; padding: 0;
+    }
+    .nav__signout:hover { color: #EF4444; }
+
+    /* ============================================================
+       AUTH MODAL
+    ============================================================ */
+    .modal-overlay {
+      position: fixed; inset: 0; z-index: 1000;
+      background: rgba(0,0,0,0.7);
+      backdrop-filter: blur(6px);
+      display: flex; align-items: center; justify-content: center;
+      padding: 20px;
+      opacity: 0; pointer-events: none;
+      transition: opacity 0.25s ease;
+    }
+    .modal-overlay.visible { opacity: 1; pointer-events: all; }
+
+    .modal {
+      background: #17171E;
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 20px;
+      padding: 36px 32px;
+      width: 100%; max-width: 400px;
+      box-shadow: 0 24px 64px rgba(0,0,0,0.6);
+      transform: translateY(12px);
+      transition: transform 0.25s ease;
+      position: relative;
+    }
+    .modal-overlay.visible .modal { transform: translateY(0); }
+
+    .modal__close {
+      position: absolute; top: 16px; right: 16px;
+      width: 30px; height: 30px; border-radius: 50%;
+      background: rgba(255,255,255,0.06);
+      border: none; color: var(--muted); font-size: 16px;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; transition: all 0.2s;
+    }
+    .modal__close:hover { background: rgba(255,255,255,0.12); color: var(--text); }
+
+    .modal__logo {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 16px; font-weight: 600; margin-bottom: 6px;
+    }
+    .modal__logo svg { color: var(--accent); }
+    .modal__subtitle { font-size: 13px; color: var(--muted); margin-bottom: 24px; }
+
+    .modal__tabs {
+      display: flex; gap: 0;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid var(--border);
+      border-radius: 10px; padding: 3px; margin-bottom: 20px;
+    }
+    .modal__tab {
+      flex: 1; padding: 8px; border-radius: 8px;
+      font-size: 13px; font-weight: 500; color: var(--muted);
+      cursor: pointer; transition: all 0.2s; border: none; background: none;
+      font-family: inherit;
+    }
+    .modal__tab.is-active { background: var(--accent); color: #fff; }
+
+    .modal__error {
+      background: rgba(239,68,68,0.08);
+      border: 1px solid rgba(239,68,68,0.25);
+      border-radius: 8px; padding: 10px 14px;
+      font-size: 13px; color: #EF4444;
+      margin-bottom: 14px; line-height: 1.5; display: none;
+    }
+    .modal__success {
+      background: rgba(34,197,94,0.08);
+      border: 1px solid rgba(34,197,94,0.25);
+      border-radius: 8px; padding: 10px 14px;
+      font-size: 13px; color: #22C55E;
+      margin-bottom: 14px; line-height: 1.5; display: none;
+    }
+
+    .modal__form { display: flex; flex-direction: column; gap: 14px; }
+    .modal__field { display: flex; flex-direction: column; gap: 6px; }
+    .modal__label {
+      font-size: 12px; font-weight: 600; color: var(--muted); letter-spacing: 0.04em;
+    }
+    .modal__input {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid var(--border); border-radius: 10px;
+      padding: 11px 14px; font-size: 14px; font-family: inherit;
+      color: var(--text); outline: none; transition: border-color 0.2s;
+      width: 100%;
+    }
+    .modal__input:focus { border-color: rgba(124,111,247,0.5); }
+    .modal__input::placeholder { color: var(--muted); }
+
+    .modal__btn {
+      width: 100%; padding: 13px; border-radius: 10px;
+      background: var(--accent); color: #fff; border: none;
+      font-size: 14px; font-weight: 600; font-family: inherit;
+      cursor: pointer; transition: background 0.2s, transform 0.15s;
+      margin-top: 4px;
+    }
+    .modal__btn:hover { background: #6A5FE0; transform: translateY(-1px); }
+    .modal__btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+    /* Token display after login */
+    .modal__token-section { display: none; }
+    .modal__token-section.visible { display: block; }
+    .modal__token-label {
+      font-size: 12px; font-weight: 600; color: var(--muted);
+      letter-spacing: 0.04em; margin-bottom: 8px;
+    }
+    .modal__token-box {
+      display: flex; gap: 8px; align-items: center;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid var(--border); border-radius: 10px;
+      padding: 11px 14px;
+    }
+    .modal__token-value {
+      flex: 1; font-size: 12px; font-family: monospace;
+      color: var(--accent); word-break: break-all; line-height: 1.4;
+    }
+    .modal__copy-btn {
+      flex-shrink: 0; padding: 6px 12px; border-radius: 7px;
+      background: rgba(124,111,247,0.15);
+      border: 1px solid rgba(124,111,247,0.3);
+      color: var(--accent); font-size: 12px; font-weight: 600;
+      font-family: inherit; cursor: pointer; transition: all 0.2s;
+    }
+    .modal__copy-btn:hover { background: rgba(124,111,247,0.25); }
+    .modal__token-hint {
+      font-size: 12px; color: var(--muted); margin-top: 10px;
+      line-height: 1.6;
+    }
+
     /* ============================================================
        HERO
     ============================================================ */
@@ -520,10 +686,25 @@
           <li><a href="#contact">Contact us</a></li>
         </ul>
       </nav>
-      <a href="https://github.com/HimanshuBhandari2196/LumiVeil" target="_blank" rel="noopener" class="nav__cta">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-        Install free
-      </a>
+      <div class="nav__right">
+        <!-- Logged-out state -->
+        <div id="navLoggedOut" style="display:flex; align-items:center; gap:10px;">
+          <button class="nav__signin" id="navSignInBtn">Sign in</button>
+          <a href="https://github.com/HimanshuBhandari2196/LumiVeil" target="_blank" rel="noopener" class="nav__cta">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Install free
+          </a>
+        </div>
+        <!-- Logged-in state -->
+        <div class="nav__user" id="navLoggedIn">
+          <span class="nav__tier" id="navTierBadge">free</span>
+          <button class="nav__token-btn" id="navTokenBtn">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+            My token
+          </button>
+          <button class="nav__signout" id="navSignOutBtn">Sign out</button>
+        </div>
+      </div>
     </div>
   </header>
 
@@ -828,7 +1009,7 @@
             </div>
             <div class="wip-card__title">Video deepfake detection</div>
             <div class="wip-card__desc">
-              Unlike images, video deepfakes hide their artifacts in the motion between frames — not in any single frame. This makes detection fundamentally harder and more computationally expensive. We're researching temporal analysis techniques and evaluating APIs that go beyond frame-by-frame sampling. Contributions and ideas are welcome.
+              Unlike images, video deepfakes hide their artifacts in the motion between frames — not in any single frame. This makes detection fundamentally harder and more computationally expensive. We're researching temporal analysis techniques and evaluating APIs that go beyond frame-by-frame sampling. Contributions and ideas welcome.
             </div>
           </div>
           <a href="https://github.com/HimanshuBhandari2196/LumiVeil/issues" target="_blank" rel="noopener" class="wip-card__cta">
@@ -936,6 +1117,63 @@
     </div>
   </footer>
 
+  <!-- ============================================================
+       AUTH MODAL
+  ============================================================ -->
+  <div class="modal-overlay" id="authModal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <div class="modal">
+      <button class="modal__close" id="modalClose" aria-label="Close">✕</button>
+
+      <div class="modal__logo">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <ellipse cx="12" cy="12" rx="10" ry="6"/>
+          <circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/>
+        </svg>
+        LumiVeil
+      </div>
+      <p class="modal__subtitle" id="modal-title">Sign in to access your account and get your extension token.</p>
+
+      <!-- Auth form (sign in / sign up) -->
+      <div id="modalAuthSection">
+        <div class="modal__tabs">
+          <button class="modal__tab is-active" id="modalTabLogin">Sign in</button>
+          <button class="modal__tab" id="modalTabSignup">Create account</button>
+        </div>
+
+        <div class="modal__error" id="modalError"></div>
+        <div class="modal__success" id="modalSuccess"></div>
+
+        <div class="modal__form">
+          <div class="modal__field">
+            <label class="modal__label" for="modalEmail">Email</label>
+            <input class="modal__input" type="email" id="modalEmail" placeholder="you@example.com" autocomplete="email" />
+          </div>
+          <div class="modal__field">
+            <label class="modal__label" for="modalPassword">Password</label>
+            <input class="modal__input" type="password" id="modalPassword" placeholder="••••••••" autocomplete="current-password" />
+          </div>
+          <button class="modal__btn" id="modalAuthBtn">Sign in</button>
+        </div>
+      </div>
+
+      <!-- Token section (shown after login) -->
+      <div class="modal__token-section" id="modalTokenSection">
+        <div class="modal__success" id="modalLoginSuccess" style="display:block">
+          ✅ Signed in successfully!
+        </div>
+        <div class="modal__token-label">Your extension token</div>
+        <div class="modal__token-box">
+          <span class="modal__token-value" id="modalTokenValue"></span>
+          <button class="modal__copy-btn" id="modalCopyBtn">Copy</button>
+        </div>
+        <p class="modal__token-hint">
+          Copy this token and paste it into the LumiVeil extension popup to connect your account. Keep it private — treat it like a password.
+        </p>
+      </div>
+
+    </div>
+  </div>
+
   <script>
     // Content type toggles
     function setToggle(el) {
@@ -947,28 +1185,205 @@
       el.setAttribute('aria-pressed', 'true');
     }
 
-    // Billing toggle — monthly vs yearly
+    // Billing toggle
     var prices = {
-      monthly: { free: '0', pro: '6',  max: '12', periodFree: '/ month', periodPro: '/ month', periodMax: '/ month' },
+      monthly: { free: '0', pro: '6',  max: '12',  periodFree: '/ month', periodPro: '/ month', periodMax: '/ month' },
       yearly:  { free: '0', pro: '59', max: '100', periodFree: '/ year',  periodPro: '/ year',  periodMax: '/ year'  }
     };
-
     function setBilling(period, btn) {
       document.querySelectorAll('.billing-toggle__btn').forEach(function(b) {
-        b.classList.remove('is-active');
-        b.setAttribute('aria-pressed', 'false');
+        b.classList.remove('is-active'); b.setAttribute('aria-pressed', 'false');
       });
-      btn.classList.add('is-active');
-      btn.setAttribute('aria-pressed', 'true');
-
+      btn.classList.add('is-active'); btn.setAttribute('aria-pressed', 'true');
       var p = prices[period];
-      document.getElementById('price-free').textContent = p.free;
-      document.getElementById('price-pro').textContent  = p.pro;
-      document.getElementById('price-max').textContent  = p.max;
-      document.getElementById('period-free').textContent = p.periodFree;
-      document.getElementById('period-pro').textContent  = p.periodPro;
-      document.getElementById('period-max').textContent  = p.periodMax;
+      document.getElementById('price-free').textContent   = p.free;
+      document.getElementById('price-pro').textContent    = p.pro;
+      document.getElementById('price-max').textContent    = p.max;
+      document.getElementById('period-free').textContent  = p.periodFree;
+      document.getElementById('period-pro').textContent   = p.periodPro;
+      document.getElementById('period-max').textContent   = p.periodMax;
     }
+
+    // ============================================================
+    // AUTH MODAL
+    // ============================================================
+    var API_BASE     = 'http://localhost:5000';
+    var LUMIVEIL_KEY = 'lumiveil-secret-2026';
+    var currentTab   = 'login';
+    var storedToken  = null;
+
+    var modal        = document.getElementById('authModal');
+    var modalError   = document.getElementById('modalError');
+    var modalSuccess = document.getElementById('modalSuccess');
+    var modalAuthBtn = document.getElementById('modalAuthBtn');
+
+    function openModal() {
+      modal.classList.add('visible');
+      document.body.style.overflow = 'hidden';
+      document.getElementById('modalEmail').focus();
+    }
+
+    function closeModal() {
+      modal.classList.remove('visible');
+      document.body.style.overflow = '';
+    }
+
+    function showModalError(msg) {
+      modalError.textContent    = msg;
+      modalError.style.display  = 'block';
+      modalSuccess.style.display = 'none';
+    }
+
+    function clearModalMessages() {
+      modalError.style.display   = 'none';
+      modalSuccess.style.display = 'none';
+    }
+
+    function switchModalTab(tab) {
+      currentTab = tab;
+      document.getElementById('modalTabLogin').classList.toggle('is-active',  tab === 'login');
+      document.getElementById('modalTabSignup').classList.toggle('is-active', tab === 'signup');
+      modalAuthBtn.textContent = tab === 'login' ? 'Sign in' : 'Create account';
+      document.getElementById('modalPassword').autocomplete = tab === 'login' ? 'current-password' : 'new-password';
+      clearModalMessages();
+    }
+
+    function updateNavLoggedIn(user, token) {
+      storedToken = token;
+      localStorage.setItem('lv_token', token);
+      localStorage.setItem('lv_user',  JSON.stringify(user));
+
+      document.getElementById('navLoggedOut').style.display = 'none';
+      document.getElementById('navLoggedIn').classList.add('visible');
+      document.getElementById('navTierBadge').textContent = user.tier || 'free';
+    }
+
+    function updateNavLoggedOut() {
+      storedToken = null;
+      localStorage.removeItem('lv_token');
+      localStorage.removeItem('lv_user');
+      document.getElementById('navLoggedOut').style.display = 'flex';
+      document.getElementById('navLoggedIn').classList.remove('visible');
+    }
+
+    function showTokenSection(token) {
+      document.getElementById('modalAuthSection').style.display  = 'none';
+      document.getElementById('modalTokenSection').classList.add('visible');
+      document.getElementById('modalTokenValue').textContent = token;
+    }
+
+    // Open modal from nav
+    document.getElementById('navSignInBtn').addEventListener('click', openModal);
+
+    // Open token view from "My token" button
+    document.getElementById('navTokenBtn').addEventListener('click', function() {
+      if (storedToken) {
+        document.getElementById('modalAuthSection').style.display = 'none';
+        document.getElementById('modalTokenSection').classList.add('visible');
+        document.getElementById('modalTokenValue').textContent = storedToken;
+        document.getElementById('modalLoginSuccess').style.display = 'none';
+        openModal();
+      }
+    });
+
+    // Sign out
+    document.getElementById('navSignOutBtn').addEventListener('click', function() {
+      updateNavLoggedOut();
+      // Reset modal back to auth form
+      document.getElementById('modalAuthSection').style.display = 'block';
+      document.getElementById('modalTokenSection').classList.remove('visible');
+      document.getElementById('modalEmail').value    = '';
+      document.getElementById('modalPassword').value = '';
+      clearModalMessages();
+      switchModalTab('login');
+    });
+
+    // Close modal
+    document.getElementById('modalClose').addEventListener('click', closeModal);
+    modal.addEventListener('click', function(e) {
+      if (e.target === modal) closeModal();
+    });
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') closeModal();
+    });
+
+    // Tab switching
+    document.getElementById('modalTabLogin').addEventListener('click',  function() { switchModalTab('login'); });
+    document.getElementById('modalTabSignup').addEventListener('click', function() { switchModalTab('signup'); });
+
+    // Copy token
+    document.getElementById('modalCopyBtn').addEventListener('click', function() {
+      var token = document.getElementById('modalTokenValue').textContent;
+      navigator.clipboard.writeText(token).then(function() {
+        document.getElementById('modalCopyBtn').textContent = 'Copied!';
+        setTimeout(function() {
+          document.getElementById('modalCopyBtn').textContent = 'Copy';
+        }, 2000);
+      });
+    });
+
+    // Auth submit
+    modalAuthBtn.addEventListener('click', function() {
+      var email    = document.getElementById('modalEmail').value.trim();
+      var password = document.getElementById('modalPassword').value;
+      clearModalMessages();
+
+      if (!email || !password) {
+        showModalError('Please enter your email and password.');
+        return;
+      }
+      if (password.length < 8) {
+        showModalError('Password must be at least 8 characters.');
+        return;
+      }
+
+      modalAuthBtn.disabled    = true;
+      modalAuthBtn.textContent = currentTab === 'login' ? 'Signing in…' : 'Creating account…';
+
+      var endpoint = currentTab === 'login' ? '/api/v1/auth/login' : '/api/v1/auth/signup';
+
+      fetch(API_BASE + endpoint, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', 'X-API-Key': LUMIVEIL_KEY },
+        body:    JSON.stringify({ email: email, password: password })
+      })
+      .then(function(r) { return r.json().then(function(d) { return { status: r.status, data: d }; }); })
+      .then(function(res) {
+        modalAuthBtn.disabled    = false;
+        modalAuthBtn.textContent = currentTab === 'login' ? 'Sign in' : 'Create account';
+
+        if (res.status === 200 || res.status === 201) {
+          updateNavLoggedIn(res.data.user, res.data.token);
+          showTokenSection(res.data.token);
+        } else {
+          showModalError(res.data.error || 'Something went wrong. Please try again.');
+        }
+      })
+      .catch(function() {
+        modalAuthBtn.disabled    = false;
+        modalAuthBtn.textContent = currentTab === 'login' ? 'Sign in' : 'Create account';
+        showModalError('Could not connect to backend. Make sure Flask is running on localhost:5000.');
+      });
+    });
+
+    // Enter key submits
+    ['modalEmail', 'modalPassword'].forEach(function(id) {
+      document.getElementById(id).addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') modalAuthBtn.click();
+      });
+    });
+
+    // Restore session on page load
+    (function() {
+      var token = localStorage.getItem('lv_token');
+      var user  = localStorage.getItem('lv_user');
+      if (token && user) {
+        try {
+          updateNavLoggedIn(JSON.parse(user), token);
+        } catch(e) {}
+      }
+    })();
+
   </script>
 
   <!-- Google Translate — free, no API key needed -->
