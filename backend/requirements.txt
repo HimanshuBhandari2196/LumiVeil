@@ -4,7 +4,5 @@ flask-limiter
 python-dotenv
 requests
 beautifulsoup4
-transformers
-torch
 Pillow
-numpy
+gunicorn

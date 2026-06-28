@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: lumiveil-api
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: LUMIVEIL_API_KEY
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: IMAGE_ANALYSIS_PROVIDER
+        value: sightengine
+      - key: SIGHTENGINE_API_USER
+        sync: false
+      - key: SIGHTENGINE_API_SECRET
+        sync: false
