@@ -722,13 +722,17 @@
       <p class="hero__sub">
         Real-time misinformation detection as you browse. Drop an image, paste a URL, or type a claim.
       </p>
-      <div class="hero__card" role="region" aria-label="Content input area">
+      <div class="hero__card" role="region" aria-label="Content input area" id="heroCard" style="cursor:pointer" onclick="document.getElementById('heroCardMsg').style.display=heroCardMsg.style.display==='block'?'none':'block'">
         <svg class="hero__card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
           <polyline points="17 8 12 3 7 8"/>
           <line x1="12" y1="3" x2="12" y2="15"/>
         </svg>
         <p class="hero__card-text">Drop an image or video, paste a URL, or type a claim</p>
+        <p id="heroCardMsg" style="display:none;font-size:13px;color:#A89FF5;margin-top:10px;line-height:1.6;">
+          📌 Analysis happens inside the Chrome extension.<br>
+          Install it using the button above, then click the LumiVeil icon in your browser to start analyzing.
+        </p>
       </div>
       <div class="hero__toggles" role="group" aria-label="Content type">
         <button class="toggle is-active" onclick="setToggle(this)" aria-pressed="true">
@@ -1185,6 +1189,12 @@
       el.setAttribute('aria-pressed', 'true');
     }
 
+    // Keep Railway backend alive — ping every 10 minutes
+    setInterval(function() {
+      fetch('https://lumiveil-api-production-8706.up.railway.app/ping')
+        .catch(function() {});
+    }, 10 * 60 * 1000);
+
     // Billing toggle
     var prices = {
       monthly: { free: '0', pro: '6',  max: '12',  periodFree: '/ month', periodPro: '/ month', periodMax: '/ month' },
@@ -1362,7 +1372,7 @@
       .catch(function() {
         modalAuthBtn.disabled    = false;
         modalAuthBtn.textContent = currentTab === 'login' ? 'Sign in' : 'Create account';
-        showModalError('Could not connect to backend. Make sure Flask is running on localhost:5000.');
+        showModalError('Could not connect to the LumiVeil server. Please try again in a moment.');
       });
     });
 

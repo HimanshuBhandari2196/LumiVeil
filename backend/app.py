@@ -34,19 +34,25 @@ from bs4 import BeautifulSoup
 import secrets
 import hashlib
 import io
+import re
 from PIL import Image
 import os
 from dotenv import load_dotenv
+from database import init_db, get_user_by_email, create_user, check_usage_allowed, increment_usage, TIER_LIMITS
+from auth import hash_password, verify_password, generate_token, get_user_from_token
 
 load_dotenv()
 
 app = Flask(__name__)
 
+# Initialise database on startup
+init_db()
+
 # ---- CORS ----
 CORS(app, resources={
     r"/api/*": {
         "origins": "*",
-        "allow_headers": ["Content-Type", "X-API-Key"],
+        "allow_headers": ["Content-Type", "X-API-Key", "Authorization"],
         "methods": ["GET", "POST", "OPTIONS"]
     }
 })
@@ -91,6 +97,18 @@ def _validate_api_key(req):
         hashlib.sha256(key.encode()).hexdigest(),
         _API_KEY_HASH
     )
+
+
+def _get_current_user(req):
+    """
+    Extract and validate the Bearer token from the Authorization header.
+    Returns the user dict if valid, or None.
+    """
+    auth_header = req.headers.get('Authorization', '')
+    if not auth_header.startswith('Bearer '):
+        return None
+    token = auth_header[7:]
+    return get_user_from_token(token)
 
 
 def _validate_input(user_input):
@@ -353,6 +371,9 @@ def check_url_credibility(url):
         'snopes.com', 'factcheck.org', 'politifact.com',
         'fullfact.org', 'boomlive.in', 'altnews.in',
         'thelogicalindian.com', 'vishvasnews.com',
+        'himanshubhandari2196.github.io',  # LumiVeil website
+        'github.io', 'github.com',         # GitHub domains
+        'railway.app',                      # Railway backend
     ]
     india_credible = [
         'ndtv.com', 'thehindu.com', 'hindustantimes.com',
@@ -597,32 +618,148 @@ def health():
     })
 
 
+@app.route('/ping', methods=['GET'])
+def ping():
+    """Ultra-lightweight keep-alive endpoint for Railway free tier."""
+    return 'pong', 200
+
+
+# ---------------------------------------------------------------------------
+# AUTH ROUTES
+# ---------------------------------------------------------------------------
+
+@app.route('/api/v1/auth/signup', methods=['POST'])
+@limiter.limit("5 per minute")
+def signup():
+    """
+    Register a new user.
+    Body: { "email": "...", "password": "..." }
+    Returns: { "token": "...", "user": { id, email, tier } }
+    """
+    body = request.get_json(silent=True)
+    if not body:
+        return jsonify({'error': 'Request body must be JSON'}), 400
+
+    email    = body.get('email', '').strip().lower()
+    password = body.get('password', '')
+
+    # Basic validation
+    if not email or not re.match(r'^[^@]+@[^@]+\.[^@]+$', email):
+        return jsonify({'error': 'Valid email required'}), 400
+    if len(password) < 8:
+        return jsonify({'error': 'Password must be at least 8 characters'}), 400
+
+    user_id = create_user(email, hash_password(password))
+    if user_id is None:
+        return jsonify({'error': 'An account with this email already exists'}), 409
+
+    token = generate_token(user_id, email, 'free')
+    return jsonify({
+        'token': token,
+        'user':  {'id': user_id, 'email': email, 'tier': 'free'}
+    }), 201
+
+
+@app.route('/api/v1/auth/login', methods=['POST'])
+@limiter.limit("10 per minute")
+def login():
+    """
+    Login with email + password.
+    Body: { "email": "...", "password": "..." }
+    Returns: { "token": "...", "user": { id, email, tier } }
+    """
+    body = request.get_json(silent=True)
+    if not body:
+        return jsonify({'error': 'Request body must be JSON'}), 400
+
+    email    = body.get('email', '').strip().lower()
+    password = body.get('password', '')
+
+    user = get_user_by_email(email)
+    if not user or not verify_password(password, user['password_hash']):
+        return jsonify({'error': 'Invalid email or password'}), 401
+
+    from database import update_last_login
+    update_last_login(user['id'])
+
+    token = generate_token(user['id'], user['email'], user['tier'])
+    return jsonify({
+        'token': token,
+        'user':  {'id': user['id'], 'email': user['email'], 'tier': user['tier']}
+    })
+
+
+@app.route('/api/v1/user/status', methods=['GET'])
+def user_status():
+    """
+    Return the current user's tier and today's usage.
+    Requires: Authorization: Bearer <token>
+    """
+    user = _get_current_user(request)
+    if not user:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    count, last_used = __import__('database').get_usage_today(user['id'])
+    limits = TIER_LIMITS.get(user['tier'], TIER_LIMITS['free'])
+
+    return jsonify({
+        'user': {
+            'id':    user['id'],
+            'email': user['email'],
+            'tier':  user['tier'],
+        },
+        'usage': {
+            'today':     count,
+            'limit':     limits['daily_limit'],
+            'remaining': max(0, limits['daily_limit'] - count),
+            'last_used': last_used,
+        },
+        'features': {
+            'image_analysis': limits['image_analysis'],
+            'api_access':     limits['api_access'],
+            'history_limit':  limits['history_limit'],
+        }
+    })
+
+
+# ---------------------------------------------------------------------------
+# MAIN ANALYZE ROUTE
+# ---------------------------------------------------------------------------
+
 @app.route('/api/v1/analyze', methods=['POST'])
 @limiter.limit("10 per minute")
 def analyze():
     """
     Main analysis endpoint.
 
-    Request body (JSON):
-        { "input": "<url | image-url | plain text claim>" }
-
     Headers:
-        X-API-Key: <LUMIVEIL_API_KEY>
+        X-API-Key:     <LUMIVEIL_API_KEY>          (required — extension auth)
+        Authorization: Bearer <jwt>                 (optional — identifies user tier)
 
-    Response (JSON):
-        {
-            "verdict":     "real" | "mixed" | "fake",
-            "trust_score": 0-100,
-            "summary":     "...",
-            "checks":      ["...", ...],
-            "real_info":   "...",
-            "sources":     ["...", ...]
-        }
+    Body: { "input": "<url | image-url | plain text claim>" }
+
+    If no valid JWT is supplied, the request is treated as a free-tier
+    anonymous request (no usage tracking, image analysis blocked).
     """
 
-    # -- Auth --
+    # -- Extension auth --
     if not _validate_api_key(request):
         return jsonify({'error': 'Unauthorized — invalid or missing API key'}), 401
+
+    # -- Identify user (optional) --
+    user = _get_current_user(request)
+    tier = user['tier'] if user else 'free'
+
+    # -- Usage check --
+    if user:
+        allowed, reason, remaining = check_usage_allowed(user['id'], tier)
+        if not allowed:
+            return jsonify({
+                'error':     'Usage limit reached',
+                'reason':    reason,
+                'tier':      tier,
+                'upgrade':   'Visit lumiveil.github.io/#pricing to upgrade'
+            }), 429
 
     # -- Parse body --
     body = request.get_json(silent=True)
@@ -645,7 +782,16 @@ def analyze():
     sensational_count = 0
 
     if is_image:
-        # -- Image: AI detection + EXIF metadata --
+        # Image analysis — Pro/Max only
+        limits = TIER_LIMITS.get(tier, TIER_LIMITS['free'])
+        if not limits['image_analysis']:
+            return jsonify({
+                'error':   'Image analysis is a Pro feature',
+                'reason':  'Upgrade to Pro to analyse images and detect deepfakes.',
+                'tier':    tier,
+                'upgrade': 'Visit lumiveil.github.io/#pricing to upgrade'
+            }), 403
+
         all_flags.append('🔍 Image detected — running AI and metadata analysis...')
 
         ai_penalty, ai_flags = analyze_image(user_input)
@@ -660,7 +806,6 @@ def analyze():
         url_score = max(0, 70 - image_penalty)
 
     elif is_url:
-        # -- URL: credibility check + page-text sensationalism --
         url_score, url_flags = check_url_credibility(user_input)
         all_flags.extend(url_flags)
 
@@ -672,7 +817,6 @@ def analyze():
             all_flags.append('⚠️ Could not fetch page content for text analysis')
 
     else:
-        # -- Plain text: sensationalism only --
         sensational_count, sens_flags = check_sensationalism(user_input)
         all_flags.extend(sens_flags)
 
@@ -687,18 +831,29 @@ def analyze():
     else:
         summary = '⚠️ This content has mixed signals. Verify with trusted sources before sharing.'
 
-    return jsonify({
+    # -- Track usage (only for logged-in users) --
+    if user:
+        increment_usage(user['id'])
+        remaining_after = max(0, TIER_LIMITS[tier]['daily_limit'] - (__import__('database').get_usage_today(user['id'])[0]))
+    else:
+        remaining_after = None
+
+    response = {
         'verdict':     verdict,
         'trust_score': final_score,
         'summary':     summary,
         'checks':      all_flags or ['✅ No red flags detected'],
         'real_info':   'Always cross-check with Reuters, BBC, AP News, or The Hindu for verified information.',
         'sources':     ['reuters.com', 'bbc.com', 'apnews.com', 'thehindu.com', 'ndtv.com'],
-    })
+        'tier':        tier,
+    }
+    if remaining_after is not None:
+        response['remaining_today'] = remaining_after
+
+    return jsonify(response)
 
 
-# Backward-compatibility alias — old extension code calls /analyze
-# Remove once extension is updated to /api/v1/analyze
+# Backward-compatibility alias
 @app.route('/analyze', methods=['POST'])
 @limiter.limit("10 per minute")
 def analyze_legacy():
