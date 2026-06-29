@@ -52,8 +52,10 @@ init_db()
 CORS(app, resources={
     r"/api/*": {
         "origins": "*",
-        "allow_headers": ["Content-Type", "X-API-Key", "Authorization"],
-        "methods": ["GET", "POST", "OPTIONS"]
+        "allow_headers": ["Content-Type", "X-API-Key", "Authorization", "Accept"],
+        "expose_headers": ["Content-Type"],
+        "methods": ["GET", "POST", "OPTIONS"],
+        "supports_credentials": False
     }
 })
 
@@ -136,13 +138,24 @@ def _validate_input(user_input):
 
 @app.after_request
 def _security_headers(response):
-    """Attach security headers to every response."""
+    """Attach security and CORS headers to every response."""
+    response.headers['Access-Control-Allow-Origin']      = '*'
+    response.headers['Access-Control-Allow-Headers']     = 'Content-Type, X-API-Key, Authorization, Accept'
+    response.headers['Access-Control-Allow-Methods']     = 'GET, POST, OPTIONS'
     response.headers['Access-Control-Allow-Private-Network'] = 'true'
-    response.headers['Access-Control-Allow-Origin']          = '*'
-    response.headers['X-Content-Type-Options']               = 'nosniff'
-    response.headers['X-Frame-Options']                      = 'DENY'
-    response.headers['X-XSS-Protection']                     = '1; mode=block'
+    response.headers['X-Content-Type-Options']           = 'nosniff'
+    response.headers['X-Frame-Options']                  = 'DENY'
+    response.headers['X-XSS-Protection']                 = '1; mode=block'
     return response
+
+
+@app.route('/api/v1/auth/signup', methods=['OPTIONS'])
+@app.route('/api/v1/auth/login', methods=['OPTIONS'])
+@app.route('/api/v1/analyze', methods=['OPTIONS'])
+@app.route('/api/v1/user/status', methods=['OPTIONS'])
+def handle_options():
+    """Explicit preflight handler for all API routes."""
+    return '', 200
 
 
 # ===========================================================================
