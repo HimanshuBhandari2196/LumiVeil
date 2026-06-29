@@ -38,7 +38,7 @@ import re
 from PIL import Image
 import os
 from dotenv import load_dotenv
-from database import init_db, get_user_by_email, create_user, check_usage_allowed, increment_usage, TIER_LIMITS
+from database import init_db, get_user_by_email, create_user, check_usage_allowed, increment_usage, TIER_LIMITS, get_usage_today, update_last_login
 from auth import hash_password, verify_password, generate_token, get_user_from_token
 
 load_dotenv()
@@ -692,7 +692,6 @@ def login():
     if not user or not verify_password(password, user['password_hash']):
         return jsonify({'error': 'Invalid email or password'}), 401
 
-    from database import update_last_login
     update_last_login(user['id'])
 
     token = generate_token(user['id'], user['email'], user['tier'])
@@ -712,7 +711,7 @@ def user_status():
     if not user:
         return jsonify({'error': 'Unauthorized'}), 401
 
-    count, last_used = __import__('database').get_usage_today(user['id'])
+    count, last_used = get_usage_today(user['id'])
     limits = TIER_LIMITS.get(user['tier'], TIER_LIMITS['free'])
 
     return jsonify({
@@ -847,7 +846,7 @@ def analyze():
     # -- Track usage (only for logged-in users) --
     if user:
         increment_usage(user['id'])
-        remaining_after = max(0, TIER_LIMITS[tier]['daily_limit'] - (__import__('database').get_usage_today(user['id'])[0]))
+        remaining_after = max(0, TIER_LIMITS[tier]['daily_limit'] - (get_usage_today(user['id'])[0]))
     else:
         remaining_after = None
 
