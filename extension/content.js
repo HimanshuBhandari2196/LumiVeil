@@ -226,7 +226,8 @@ function analyzePage() {
 
   chrome.runtime.sendMessage({
     action: 'analyze',
-    input:  inputToAnalyze
+    input:  inputToAnalyze,
+    locale: navigator.language || ''
   }, function (response) {
     if (response && response.success) {
       console.log('LumiVeil: Score:', response.data.trust_score);

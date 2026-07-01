@@ -168,7 +168,7 @@ document.addEventListener('DOMContentLoaded', function () {
       fetch('https://lumiveil-api-production-8706.up.railway.app/api/v1/analyze', {
         method: 'POST',
         headers: headers,
-        body: JSON.stringify({ input: input.trim() })
+        body: JSON.stringify({ input: input.trim(), locale: navigator.language || '' })
       })
       .then(function(response) {
         return response.json().then(function(d) { return { status: response.status, data: d }; });

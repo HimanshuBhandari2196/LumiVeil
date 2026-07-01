@@ -368,10 +368,108 @@ def fetch_page_text(url):
         return None
 
 
-def check_url_credibility(url):
+def get_regional_sources(locale):
+    """
+    Return the primary trusted-source list for a given locale string.
+    locale is a BCP-47 tag like 'en-IN', 'en-US', 'de-DE', 'fr-FR' etc.
+    Falls back to global sources when no region match is found.
+    """
+    if not locale:
+        return []
+
+    loc = locale.lower().strip()
+
+    # Extract region code (e.g. 'en-IN' → 'in', 'de-DE' → 'de')
+    region = loc.split('-')[1] if '-' in loc else loc
+
+    region_map = {
+        'in': [  # India
+            'ndtv.com', 'thehindu.com', 'hindustantimes.com',
+            'indianexpress.com', 'timesofindia.com', 'livemint.com',
+            'thewire.in', 'scroll.in', 'theprint.in',
+            'businessstandard.com', 'economictimes.indiatimes.com',
+            'aajtak.in', 'abplive.com', 'zeenews.india.com',
+            'news18.com', 'republicworld.com', 'wionews.com',
+            'pib.gov.in', 'india.gov.in', 'mygov.in',
+            'isro.gov.in', 'rbi.org.in', 'boomlive.in', 'altnews.in',
+        ],
+        'us': [  # United States
+            'nytimes.com', 'washingtonpost.com', 'wsj.com',
+            'usatoday.com', 'newsweek.com', 'time.com',
+            'theatlantic.com', 'npr.org', 'pbs.org',
+            'abcnews.go.com', 'cbsnews.com', 'nbcnews.com',
+            'foxnews.com', 'cnn.com', 'msnbc.com',
+            'nasa.gov', 'nih.gov', 'cdc.gov', 'fda.gov',
+            'whitehouse.gov', 'congress.gov', 'supremecourt.gov',
+            'factcheck.org', 'politifact.com', 'snopes.com',
+        ],
+        'gb': [  # United Kingdom
+            'bbc.co.uk', 'bbc.com', 'thetimes.co.uk', 'telegraph.co.uk',
+            'independent.co.uk', 'mirror.co.uk', 'dailymail.co.uk',
+            'theguardian.com', 'sky.com', 'itv.com',
+            'gov.uk', 'parliament.uk', 'fullfact.org',
+        ],
+        'au': [  # Australia
+            'abc.net.au', 'nzherald.co.nz', 'smh.com.au',
+            'theaustralian.com.au', 'theguardian.com/au',
+            'sbs.com.au', 'news.com.au',
+        ],
+        'de': [  # Germany
+            'spiegel.de', 'zeit.de', 'sueddeutsche.de',
+            'faz.net', 'tagesschau.de', 'dw.com',
+            'bundesregierung.de',
+        ],
+        'fr': [  # France
+            'lemonde.fr', 'lefigaro.fr', 'liberation.fr',
+            'france24.com', 'rfi.fr', 'bfmtv.com',
+            'gouvernement.fr',
+        ],
+        'jp': [  # Japan
+            'japantimes.co.jp', 'nhk.or.jp', 'asahi.com',
+            'mainichi.jp', 'yomiuri.co.jp',
+        ],
+        'kr': [  # South Korea
+            'koreaherald.com', 'koreatimes.co.kr',
+            'yonhapnewsagency.com',
+        ],
+        'sg': [  # Singapore
+            'straitstimes.com', 'channelnewsasia.com',
+            'todayonline.com', 'gov.sg',
+        ],
+        'za': [  # South Africa
+            'dailymaverick.co.za', 'news24.com',
+            'timeslive.co.za', 'businesslive.co.za',
+        ],
+        'ng': [  # Nigeria
+            'premiumtimesng.com', 'thecable.ng',
+            'punchng.com', 'vanguardngr.com',
+        ],
+        'pk': [  # Pakistan
+            'dawn.com', 'geo.tv', 'thenews.com.pk',
+            'arynews.tv',
+        ],
+        'ca': [  # Canada
+            'cbc.ca', 'globeandmail.com', 'nationalpost.com',
+            'thestar.com', 'macleans.ca',
+        ],
+        'ae': [  # UAE / Middle East
+            'thenationalnews.com', 'khaleejtimes.com',
+            'gulfnews.com', 'alarabiya.net',
+        ],
+    }
+
+    return region_map.get(region, [])
+
+
+def check_url_credibility(url, locale=None):
     """
     Score a URL against regional trusted-domain lists, known fake-news
     domains, social media platforms, and suspicious URL patterns.
+
+    locale: BCP-47 string from the user's browser (e.g. 'en-IN', 'en-US').
+    When provided, matching a regional source gives a +40 bonus instead of
+    the default +30 — making local verification more meaningful.
+
     Returns (score: int, flags: list[str]).
     """
 
@@ -386,10 +484,11 @@ def check_url_credibility(url):
         'snopes.com', 'factcheck.org', 'politifact.com',
         'fullfact.org', 'boomlive.in', 'altnews.in',
         'thelogicalindian.com', 'vishvasnews.com',
-        'himanshubhandari2196.github.io',  # LumiVeil website
-        'github.io', 'github.com',         # GitHub domains
-        'railway.app',                      # Railway backend
+        'himanshubhandari2196.github.io',
+        'github.io', 'github.com',
+        'railway.app',
     ]
+
     india_credible = [
         'ndtv.com', 'thehindu.com', 'hindustantimes.com',
         'indianexpress.com', 'timesofindia.com', 'livemint.com',
@@ -434,6 +533,9 @@ def check_url_credibility(url):
         global_credible + india_credible + usa_credible +
         uk_credible + europe_credible + mea_credible + asia_credible
     )
+
+    # Regional sources for this user's locale
+    regional_sources = get_regional_sources(locale)
 
     # -- Social media: neutral note, slight penalty --
     social_media = [
@@ -480,14 +582,25 @@ def check_url_credibility(url):
             score -= 5
             break
 
-    # Trusted domain check
+    # Regional source check — higher bonus than generic global match
     matched = False
-    for domain in all_credible:
-        if domain in url_low:
-            score  += 30
-            flags.append(f'✅ Trusted domain: {domain}')
-            matched = True
-            break
+    if regional_sources:
+        for domain in regional_sources:
+            if domain in url_low:
+                score += 40
+                flags.append(f'✅ Trusted regional source: {domain}')
+                matched = True
+                break
+
+    # Fall back to global trusted list
+    if not matched:
+        for domain in all_credible:
+            if domain in url_low:
+                score += 30
+                flags.append(f'✅ Trusted domain: {domain}')
+                matched = True
+                break
+
     if not matched:
         flags.append('⚠️ Domain not in our trusted list')
         score -= 10
@@ -829,9 +942,14 @@ def analyze():
         return jsonify({'error': 'Request body must be JSON'}), 400
 
     user_input = body.get('input', '')
+    locale     = body.get('locale', '')   # BCP-47 locale from browser e.g. 'en-IN'
     valid, errors = _validate_input(user_input)
     if not valid:
         return jsonify({'error': 'Invalid input', 'details': errors}), 400
+
+    # Sanitise locale — only allow safe characters
+    import re as _re
+    locale = _re.sub(r'[^a-zA-Z\-]', '', locale)[:10] if locale else ''
 
     # -- Classify input type --
     image_exts = ('.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp')
@@ -868,7 +986,7 @@ def analyze():
         url_score = max(0, 70 - image_penalty)
 
     elif is_url:
-        url_score, url_flags = check_url_credibility(user_input)
+        url_score, url_flags = check_url_credibility(user_input, locale=locale)
         all_flags.extend(url_flags)
 
         page_text = fetch_page_text(user_input)

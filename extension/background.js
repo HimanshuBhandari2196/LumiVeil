@@ -73,7 +73,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
       fetch(BACKEND_URL, {
         method:  'POST',
         headers: headers,
-        body:    JSON.stringify({ input: request.input })
+        body:    JSON.stringify({ input: request.input, locale: request.locale || '' })
       })
       .then(response => response.json())
       .then(data => {

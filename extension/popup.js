@@ -237,7 +237,7 @@ document.addEventListener('DOMContentLoaded', function () {
       if (sessionData.lv_token) headers['Authorization'] = `Bearer ${sessionData.lv_token}`;
 
       authedFetch(`${API_BASE}/api/v1/analyze`, {
-        method: 'POST', headers, body: JSON.stringify({ input })
+        method: 'POST', headers, body: JSON.stringify({ input, locale: navigator.language || '' })
       }, function ({ status, data }) {
         analyzeBtn.disabled    = false;
         analyzeBtn.textContent = 'Analyze';
