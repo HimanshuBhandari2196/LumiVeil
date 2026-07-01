@@ -1,74 +1,62 @@
 """
 LumiVeil — Database Layer
 =========================
-SQLite via Python's built-in sqlite3.
-No ORM — keeps dependencies minimal and the code readable.
+PostgreSQL via psycopg2. Switched from SQLite to persist data
+across Railway redeploys (SQLite lives on ephemeral filesystem).
 
 Tables
 ------
-  users   — accounts, tiers, hashed passwords
-  usage   — daily analysis counts per user
-  payments — payment records (for future Stripe/Razorpay integration)
-
-Usage
------
-  from database import init_db, get_db
-  init_db()          # call once at startup
-  db = get_db()      # get a connection anywhere
+  users          — accounts, tiers, hashed passwords
+  usage          — daily analysis counts per user
+  payments       — payment records (Stripe/Razorpay)
+  refresh_tokens — long-lived tokens for silent re-auth
 """
 
-import sqlite3
 import os
+import psycopg2
+import psycopg2.extras
 from datetime import datetime, date
 
-DB_PATH = os.path.join(os.path.dirname(__file__), 'lumiveil.db')
+DATABASE_URL = os.environ.get('DATABASE_URL', '')
 
 SCHEMA = """
--- Users table
 CREATE TABLE IF NOT EXISTS users (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    id            SERIAL PRIMARY KEY,
     email         TEXT    NOT NULL UNIQUE,
     password_hash TEXT    NOT NULL,
-    tier          TEXT    NOT NULL DEFAULT 'free',  -- 'free' | 'pro' | 'max'
+    tier          TEXT    NOT NULL DEFAULT 'free',
     created_at    TEXT    NOT NULL,
     last_login    TEXT
 );
 
--- Daily usage tracking
 CREATE TABLE IF NOT EXISTS usage (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id    INTEGER NOT NULL,
-    date       TEXT    NOT NULL,   -- YYYY-MM-DD
+    id         SERIAL PRIMARY KEY,
+    user_id    INTEGER NOT NULL REFERENCES users(id),
+    date       TEXT    NOT NULL,
     count      INTEGER NOT NULL DEFAULT 0,
-    last_used  TEXT,               -- ISO timestamp of last analysis
-    FOREIGN KEY (user_id) REFERENCES users(id),
-    UNIQUE(user_id, date)          -- one row per user per day
+    last_used  TEXT,
+    UNIQUE(user_id, date)
 );
 
--- Payment records (populated when Stripe/Razorpay webhooks fire)
 CREATE TABLE IF NOT EXISTS payments (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id      INTEGER NOT NULL,
+    id           SERIAL PRIMARY KEY,
+    user_id      INTEGER NOT NULL REFERENCES users(id),
     amount       REAL    NOT NULL,
     currency     TEXT    NOT NULL DEFAULT 'USD',
-    provider     TEXT    NOT NULL,   -- 'stripe' | 'razorpay'
-    provider_id  TEXT,               -- provider's transaction ID
-    tier         TEXT    NOT NULL,   -- tier this payment unlocks
-    status       TEXT    NOT NULL DEFAULT 'pending',  -- 'pending' | 'completed' | 'failed'
-    created_at   TEXT    NOT NULL,
-    FOREIGN KEY (user_id) REFERENCES users(id)
+    provider     TEXT    NOT NULL,
+    provider_id  TEXT,
+    tier         TEXT    NOT NULL,
+    status       TEXT    NOT NULL DEFAULT 'pending',
+    created_at   TEXT    NOT NULL
 );
 
--- Refresh tokens — long-lived, used only to mint new access tokens.
--- Stored hashed (never plaintext) so a DB leak doesn't expose usable tokens.
 CREATE TABLE IF NOT EXISTS refresh_tokens (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id     INTEGER NOT NULL,
+    id          SERIAL PRIMARY KEY,
+    user_id     INTEGER NOT NULL REFERENCES users(id),
     token_hash  TEXT    NOT NULL UNIQUE,
     created_at  TEXT    NOT NULL,
     expires_at  TEXT    NOT NULL,
-    revoked     INTEGER NOT NULL DEFAULT 0,   -- 1 = revoked (signed out / rotated)
-    FOREIGN KEY (user_id) REFERENCES users(id)
+    revoked     INTEGER NOT NULL DEFAULT 0
 );
 """
 
@@ -77,45 +65,44 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
 # ---------------------------------------------------------------------------
 TIER_LIMITS = {
     'free': {
-        'daily_limit':      30,
-        'refresh_hours':    5,
-        'image_analysis':   False,
-        'history_limit':    0,
-        'api_access':       False,
+        'daily_limit':    30,
+        'refresh_hours':  5,
+        'image_analysis': False,
+        'history_limit':  0,
+        'api_access':     False,
     },
     'pro': {
-        'daily_limit':      300,
-        'refresh_hours':    0,      # no wait
-        'image_analysis':   True,
-        'history_limit':    50,
-        'api_access':       False,
+        'daily_limit':    300,
+        'refresh_hours':  0,
+        'image_analysis': True,
+        'history_limit':  50,
+        'api_access':     False,
     },
     'max': {
-        'daily_limit':      999999, # effectively unlimited
-        'refresh_hours':    0,
-        'image_analysis':   True,
-        'history_limit':    999999,
-        'api_access':       True,
+        'daily_limit':    999999,
+        'refresh_hours':  0,
+        'image_analysis': True,
+        'history_limit':  999999,
+        'api_access':     True,
     },
 }
 
 
 def get_db():
-    """Return a sqlite3 connection with row_factory set to Row (dict-like access)."""
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")   # better concurrent read performance
-    conn.execute("PRAGMA foreign_keys=ON")
+    """Return a psycopg2 connection with RealDictCursor for dict-like row access."""
+    conn = psycopg2.connect(DATABASE_URL)
     return conn
 
 
 def init_db():
     """Create all tables if they don't exist. Safe to call on every startup."""
     conn = get_db()
-    conn.executescript(SCHEMA)
+    cur  = conn.cursor()
+    cur.execute(SCHEMA)
     conn.commit()
+    cur.close()
     conn.close()
-    print(f'[DB] Initialised at {DB_PATH}')
+    print('[DB] PostgreSQL initialised')
 
 
 # ---------------------------------------------------------------------------
@@ -126,56 +113,54 @@ def create_user(email, password_hash):
     """Insert a new user. Returns the new user's id, or None if email taken."""
     try:
         conn = get_db()
-        cursor = conn.execute(
-            "INSERT INTO users (email, password_hash, tier, created_at) VALUES (?, ?, 'free', ?)",
+        cur  = conn.cursor()
+        cur.execute(
+            "INSERT INTO users (email, password_hash, tier, created_at) VALUES (%s, %s, 'free', %s) RETURNING id",
             (email.lower().strip(), password_hash, datetime.utcnow().isoformat())
         )
+        user_id = cur.fetchone()[0]
         conn.commit()
-        user_id = cursor.lastrowid
-        conn.close()
+        cur.close(); conn.close()
         return user_id
-    except sqlite3.IntegrityError:
-        return None   # email already taken
+    except psycopg2.IntegrityError:
+        return None
 
 
 def get_user_by_email(email):
-    """Return a user row by email, or None."""
     conn = get_db()
-    row = conn.execute(
-        "SELECT * FROM users WHERE email = ?", (email.lower().strip(),)
-    ).fetchone()
-    conn.close()
+    cur  = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM users WHERE email = %s", (email.lower().strip(),))
+    row = cur.fetchone()
+    cur.close(); conn.close()
     return dict(row) if row else None
 
 
 def get_user_by_id(user_id):
-    """Return a user row by id, or None."""
     conn = get_db()
-    row = conn.execute(
-        "SELECT * FROM users WHERE id = ?", (user_id,)
-    ).fetchone()
-    conn.close()
+    cur  = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM users WHERE id = %s", (user_id,))
+    row = cur.fetchone()
+    cur.close(); conn.close()
     return dict(row) if row else None
 
 
 def update_last_login(user_id):
     conn = get_db()
-    conn.execute(
-        "UPDATE users SET last_login = ? WHERE id = ?",
-        (datetime.utcnow().isoformat(), user_id)
-    )
+    cur  = conn.cursor()
+    cur.execute("UPDATE users SET last_login = %s WHERE id = %s",
+                (datetime.utcnow().isoformat(), user_id))
     conn.commit()
-    conn.close()
+    cur.close(); conn.close()
 
 
 def set_user_tier(user_id, tier):
-    """Upgrade or downgrade a user's tier. Called by payment webhook."""
     if tier not in TIER_LIMITS:
         raise ValueError(f'Unknown tier: {tier}')
     conn = get_db()
-    conn.execute("UPDATE users SET tier = ? WHERE id = ?", (tier, user_id))
+    cur  = conn.cursor()
+    cur.execute("UPDATE users SET tier = %s WHERE id = %s", (tier, user_id))
     conn.commit()
-    conn.close()
+    cur.close(); conn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -183,48 +168,38 @@ def set_user_tier(user_id, tier):
 # ---------------------------------------------------------------------------
 
 def get_usage_today(user_id):
-    """
-    Return (count, last_used) for today.
-    If no row exists yet, returns (0, None).
-    """
     today = date.today().isoformat()
     conn  = get_db()
-    row   = conn.execute(
-        "SELECT count, last_used FROM usage WHERE user_id = ? AND date = ?",
+    cur   = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute(
+        "SELECT count, last_used FROM usage WHERE user_id = %s AND date = %s",
         (user_id, today)
-    ).fetchone()
-    conn.close()
+    )
+    row = cur.fetchone()
+    cur.close(); conn.close()
     if row:
         return row['count'], row['last_used']
     return 0, None
 
 
 def increment_usage(user_id):
-    """
-    Increment today's analysis count for a user.
-    Uses INSERT OR REPLACE to handle first-use-of-day automatically.
-    """
     today = date.today().isoformat()
     now   = datetime.utcnow().isoformat()
     conn  = get_db()
-    conn.execute("""
+    cur   = conn.cursor()
+    cur.execute("""
         INSERT INTO usage (user_id, date, count, last_used)
-        VALUES (?, ?, 1, ?)
-        ON CONFLICT(user_id, date)
-        DO UPDATE SET count = count + 1, last_used = excluded.last_used
+        VALUES (%s, %s, 1, %s)
+        ON CONFLICT (user_id, date)
+        DO UPDATE SET count = usage.count + 1, last_used = EXCLUDED.last_used
     """, (user_id, today, now))
     conn.commit()
-    conn.close()
+    cur.close(); conn.close()
 
 
 def check_usage_allowed(user_id, tier):
-    """
-    Check whether this user can perform another analysis right now.
-    Returns (allowed: bool, reason: str, remaining: int).
-    """
     from datetime import datetime, timedelta
-
-    limits = TIER_LIMITS.get(tier, TIER_LIMITS['free'])
+    limits        = TIER_LIMITS.get(tier, TIER_LIMITS['free'])
     daily_limit   = limits['daily_limit']
     refresh_hours = limits['refresh_hours']
 
@@ -233,20 +208,19 @@ def check_usage_allowed(user_id, tier):
     if count < daily_limit:
         return True, 'ok', daily_limit - count
 
-    # Limit hit — check if refresh window has passed (free tier only)
     if refresh_hours > 0 and last_used:
         last_dt    = datetime.fromisoformat(last_used)
         next_reset = last_dt + timedelta(hours=refresh_hours)
         if datetime.utcnow() >= next_reset:
-            # Reset their count for today
             today = date.today().isoformat()
             conn  = get_db()
-            conn.execute(
-                "UPDATE usage SET count = 0 WHERE user_id = ? AND date = ?",
+            cur   = conn.cursor()
+            cur.execute(
+                "UPDATE usage SET count = 0 WHERE user_id = %s AND date = %s",
                 (user_id, today)
             )
             conn.commit()
-            conn.close()
+            cur.close(); conn.close()
             return True, 'ok', daily_limit
 
         wait_mins = int((next_reset - datetime.utcnow()).total_seconds() / 60)
@@ -260,15 +234,14 @@ def check_usage_allowed(user_id, tier):
 # ---------------------------------------------------------------------------
 
 def record_payment(user_id, amount, currency, provider, provider_id, tier):
-    """Insert a payment record. Call this from Stripe/Razorpay webhook handler."""
     conn = get_db()
-    conn.execute("""
+    cur  = conn.cursor()
+    cur.execute("""
         INSERT INTO payments (user_id, amount, currency, provider, provider_id, tier, status, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, 'completed', ?)
+        VALUES (%s, %s, %s, %s, %s, %s, 'completed', %s)
     """, (user_id, amount, currency, provider, provider_id, tier, datetime.utcnow().isoformat()))
     conn.commit()
-    conn.close()
-    # Upgrade the user's tier immediately
+    cur.close(); conn.close()
     set_user_tier(user_id, tier)
 
 
@@ -277,41 +250,36 @@ def record_payment(user_id, amount, currency, provider, provider_id, tier):
 # ---------------------------------------------------------------------------
 
 def store_refresh_token(user_id, token_hash, expires_at):
-    """Insert a new refresh token record (hashed, never plaintext)."""
     conn = get_db()
-    conn.execute("""
+    cur  = conn.cursor()
+    cur.execute("""
         INSERT INTO refresh_tokens (user_id, token_hash, created_at, expires_at, revoked)
-        VALUES (?, ?, ?, ?, 0)
+        VALUES (%s, %s, %s, %s, 0)
     """, (user_id, token_hash, datetime.utcnow().isoformat(), expires_at))
     conn.commit()
-    conn.close()
+    cur.close(); conn.close()
 
 
 def get_refresh_token(token_hash):
-    """Return the refresh token row by its hash, or None."""
     conn = get_db()
-    row = conn.execute(
-        "SELECT * FROM refresh_tokens WHERE token_hash = ?", (token_hash,)
-    ).fetchone()
-    conn.close()
+    cur  = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM refresh_tokens WHERE token_hash = %s", (token_hash,))
+    row = cur.fetchone()
+    cur.close(); conn.close()
     return dict(row) if row else None
 
 
 def revoke_refresh_token(token_hash):
-    """Mark a single refresh token as revoked (used on sign out or rotation)."""
     conn = get_db()
-    conn.execute(
-        "UPDATE refresh_tokens SET revoked = 1 WHERE token_hash = ?", (token_hash,)
-    )
+    cur  = conn.cursor()
+    cur.execute("UPDATE refresh_tokens SET revoked = 1 WHERE token_hash = %s", (token_hash,))
     conn.commit()
-    conn.close()
+    cur.close(); conn.close()
 
 
 def revoke_all_refresh_tokens(user_id):
-    """Revoke every refresh token for a user — used for 'sign out everywhere'."""
     conn = get_db()
-    conn.execute(
-        "UPDATE refresh_tokens SET revoked = 1 WHERE user_id = ?", (user_id,)
-    )
+    cur  = conn.cursor()
+    cur.execute("UPDATE refresh_tokens SET revoked = 1 WHERE user_id = %s", (user_id,))
     conn.commit()
-    conn.close()
+    cur.close(); conn.close()
