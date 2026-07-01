@@ -13,7 +13,7 @@ import os
 import requests
 
 RESEND_API_KEY  = os.environ.get('RESEND_API_KEY', '')
-FROM_EMAIL      = 'LumiVeil <noreply@lumiveil.app>'
+FROM_EMAIL      = 'LumiVeil <onboarding@resend.dev>'
 WEBSITE_URL     = 'https://himanshubhandari2196.github.io/LumiVeil'
 BACKEND_URL     = 'https://lumiveil-api-production-8706.up.railway.app'
 
