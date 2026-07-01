@@ -26,8 +26,15 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash TEXT    NOT NULL,
     tier          TEXT    NOT NULL DEFAULT 'free',
     created_at    TEXT    NOT NULL,
-    last_login    TEXT
+    last_login    TEXT,
+    email_verified INTEGER NOT NULL DEFAULT 0
 );
+
+-- Add email_verified column if it doesn't exist (for existing deployments)
+DO $$ BEGIN
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified INTEGER NOT NULL DEFAULT 0;
+EXCEPTION WHEN duplicate_column THEN NULL;
+END $$;
 
 CREATE TABLE IF NOT EXISTS usage (
     id         SERIAL PRIMARY KEY,
@@ -57,6 +64,24 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
     created_at  TEXT    NOT NULL,
     expires_at  TEXT    NOT NULL,
     revoked     INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS email_verifications (
+    id         SERIAL PRIMARY KEY,
+    user_id    INTEGER NOT NULL REFERENCES users(id),
+    token      TEXT    NOT NULL UNIQUE,
+    created_at TEXT    NOT NULL,
+    expires_at TEXT    NOT NULL,
+    used       INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS password_resets (
+    id         SERIAL PRIMARY KEY,
+    user_id    INTEGER NOT NULL REFERENCES users(id),
+    token      TEXT    NOT NULL UNIQUE,
+    created_at TEXT    NOT NULL,
+    expires_at TEXT    NOT NULL,
+    used       INTEGER NOT NULL DEFAULT 0
 );
 """
 
@@ -283,3 +308,108 @@ def revoke_all_refresh_tokens(user_id):
     cur.execute("UPDATE refresh_tokens SET revoked = 1 WHERE user_id = %s", (user_id,))
     conn.commit()
     cur.close(); conn.close()
+
+# ---------------------------------------------------------------------------
+# EMAIL VERIFICATION HELPERS
+# ---------------------------------------------------------------------------
+
+def create_email_verification_token(user_id):
+    """Create a verification token valid for 24 hours. Returns the raw token."""
+    import secrets as _secrets
+    from datetime import timedelta
+    token      = _secrets.token_urlsafe(32)
+    expires_at = (datetime.utcnow() + timedelta(hours=24)).isoformat()
+    conn = get_db()
+    cur  = conn.cursor()
+    # Invalidate any existing unused tokens for this user first
+    cur.execute("UPDATE email_verifications SET used = 1 WHERE user_id = %s AND used = 0", (user_id,))
+    cur.execute("""
+        INSERT INTO email_verifications (user_id, token, created_at, expires_at, used)
+        VALUES (%s, %s, %s, %s, 0)
+    """, (user_id, token, datetime.utcnow().isoformat(), expires_at))
+    conn.commit()
+    cur.close(); conn.close()
+    return token
+
+
+def verify_email_token(token):
+    """
+    Validate and consume an email verification token.
+    Returns the user_id on success, or None on failure.
+    """
+    conn = get_db()
+    cur  = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM email_verifications WHERE token = %s AND used = 0", (token,))
+    row = cur.fetchone()
+    if not row:
+        cur.close(); conn.close()
+        return None
+
+    # Check expiry
+    expires_at = datetime.fromisoformat(row['expires_at'])
+    if datetime.utcnow() > expires_at:
+        cur.close(); conn.close()
+        return None
+
+    # Mark token used and verify user
+    cur.execute("UPDATE email_verifications SET used = 1 WHERE id = %s", (row['id'],))
+    cur.execute("UPDATE users SET email_verified = 1 WHERE id = %s", (row['user_id'],))
+    conn.commit()
+    cur.close(); conn.close()
+    return row['user_id']
+
+
+# ---------------------------------------------------------------------------
+# PASSWORD RESET HELPERS
+# ---------------------------------------------------------------------------
+
+def create_password_reset_token(user_id):
+    """Create a password reset token valid for 1 hour. Returns the raw token."""
+    import secrets as _secrets
+    from datetime import timedelta
+    token      = _secrets.token_urlsafe(32)
+    expires_at = (datetime.utcnow() + timedelta(hours=1)).isoformat()
+    conn = get_db()
+    cur  = conn.cursor()
+    cur.execute("UPDATE password_resets SET used = 1 WHERE user_id = %s AND used = 0", (user_id,))
+    cur.execute("""
+        INSERT INTO password_resets (user_id, token, created_at, expires_at, used)
+        VALUES (%s, %s, %s, %s, 0)
+    """, (user_id, token, datetime.utcnow().isoformat(), expires_at))
+    conn.commit()
+    cur.close(); conn.close()
+    return token
+
+
+def verify_password_reset_token(token):
+    """
+    Validate a password reset token without consuming it.
+    Returns the user_id on success, or None on failure.
+    """
+    conn = get_db()
+    cur  = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM password_resets WHERE token = %s AND used = 0", (token,))
+    row = cur.fetchone()
+    if not row:
+        cur.close(); conn.close()
+        return None
+    expires_at = datetime.fromisoformat(row['expires_at'])
+    if datetime.utcnow() > expires_at:
+        cur.close(); conn.close()
+        return None
+    cur.close(); conn.close()
+    return row['user_id']
+
+
+def consume_password_reset_token(token, new_password_hash):
+    """Consume a reset token and update the user's password."""
+    user_id = verify_password_reset_token(token)
+    if not user_id:
+        return False
+    conn = get_db()
+    cur  = conn.cursor()
+    cur.execute("UPDATE password_resets SET used = 1 WHERE token = %s", (token,))
+    cur.execute("UPDATE users SET password_hash = %s WHERE id = %s", (new_password_hash, user_id))
+    conn.commit()
+    cur.close(); conn.close()
+    return True

@@ -39,8 +39,9 @@ import json
 from PIL import Image
 import os
 from dotenv import load_dotenv
-from database import init_db, get_user_by_email, create_user, check_usage_allowed, increment_usage, TIER_LIMITS, get_usage_today, update_last_login
+from database import init_db, get_user_by_email, create_user, check_usage_allowed, increment_usage, TIER_LIMITS, get_usage_today, update_last_login, create_email_verification_token, verify_email_token, create_password_reset_token, verify_password_reset_token, consume_password_reset_token
 from auth import hash_password, verify_password, generate_token, get_user_from_token, issue_token_pair, refresh_access_token, revoke_refresh_token_plaintext
+from email_service import send_verification_email, send_password_reset_email
 
 load_dotenv()
 
@@ -156,6 +157,9 @@ def _security_headers(response):
 @app.route('/api/v1/auth/login', methods=['OPTIONS'])
 @app.route('/api/v1/auth/refresh', methods=['OPTIONS'])
 @app.route('/api/v1/auth/logout', methods=['OPTIONS'])
+@app.route('/api/v1/auth/forgot-password', methods=['OPTIONS'])
+@app.route('/api/v1/auth/reset-password', methods=['OPTIONS'])
+@app.route('/api/v1/auth/resend-verification', methods=['OPTIONS'])
 @app.route('/api/v1/analyze', methods=['OPTIONS'])
 @app.route('/api/v1/user/status', methods=['OPTIONS'])
 def handle_options():
@@ -987,11 +991,18 @@ def signup():
     if user_id is None:
         return jsonify({'error': 'An account with this email already exists'}), 409
 
+    # Send verification email (non-blocking — signup succeeds even if email fails)
+    try:
+        verification_token = create_email_verification_token(user_id)
+        send_verification_email(email, verification_token)
+    except Exception:
+        pass  # Don't block signup if email fails
+
     tokens = issue_token_pair(user_id, email, 'free')
     return jsonify({
         'token':         tokens['access_token'],
         'refresh_token': tokens['refresh_token'],
-        'user':          {'id': user_id, 'email': email, 'tier': 'free'}
+        'user':          {'id': user_id, 'email': email, 'tier': 'free', 'email_verified': False}
     }), 201
 
 
@@ -1051,8 +1062,102 @@ def refresh():
         return jsonify({'error': str(e)}), 401
 
 
-@app.route('/api/v1/auth/logout', methods=['POST'])
-def logout():
+@app.route('/api/v1/auth/verify-email', methods=['GET'])
+def verify_email():
+    """
+    Called when user clicks the verification link in their email.
+    Marks the account as verified and redirects to the website.
+    """
+    token = request.args.get('token', '')
+    if not token:
+        return '<h2>Invalid verification link.</h2>', 400
+
+    user_id = verify_email_token(token)
+    if not user_id:
+        return '''
+        <html><body style="font-family:sans-serif;text-align:center;padding:60px;background:#0C0C10;color:#fff;">
+        <h2 style="color:#EF4444;">❌ Invalid or expired verification link.</h2>
+        <p style="color:#9490A8;">This link may have expired (24 hours) or already been used.</p>
+        <a href="https://himanshubhandari2196.github.io/LumiVeil" style="color:#7C6FF7;">Return to LumiVeil</a>
+        </body></html>
+        ''', 400
+
+    return '''
+    <html><body style="font-family:sans-serif;text-align:center;padding:60px;background:#0C0C10;color:#fff;">
+    <h2 style="color:#22C55E;">✅ Email verified successfully!</h2>
+    <p style="color:#9490A8;">Your LumiVeil account is now fully activated.</p>
+    <p style="color:#9490A8;">You can close this tab and return to the extension.</p>
+    <a href="https://himanshubhandari2196.github.io/LumiVeil" style="color:#7C6FF7;">Return to LumiVeil</a>
+    </body></html>
+    '''
+
+
+@app.route('/api/v1/auth/forgot-password', methods=['POST'])
+@limiter.limit("5 per minute")
+def forgot_password():
+    """
+    Send a password reset email.
+    Body: { "email": "..." }
+    Always returns 200 to prevent email enumeration attacks.
+    """
+    body  = request.get_json(silent=True) or {}
+    email = body.get('email', '').strip().lower()
+
+    if email:
+        user = get_user_by_email(email)
+        if user:
+            try:
+                token = create_password_reset_token(user['id'])
+                send_password_reset_email(email, token)
+            except Exception:
+                pass
+
+    # Always return success — don't reveal whether email exists
+    return jsonify({'message': 'If an account exists with this email, a reset link has been sent.'})
+
+
+@app.route('/api/v1/auth/reset-password', methods=['POST'])
+@limiter.limit("5 per minute")
+def reset_password():
+    """
+    Reset a user's password using a valid reset token.
+    Body: { "token": "...", "password": "..." }
+    """
+    body     = request.get_json(silent=True) or {}
+    token    = body.get('token', '')
+    password = body.get('password', '')
+
+    if not token or not password:
+        return jsonify({'error': 'Token and password are required'}), 400
+    if len(password) < 8:
+        return jsonify({'error': 'Password must be at least 8 characters'}), 400
+
+    success = consume_password_reset_token(token, hash_password(password))
+    if not success:
+        return jsonify({'error': 'Invalid or expired reset token'}), 400
+
+    return jsonify({'message': 'Password reset successfully. You can now sign in.'})
+
+
+@app.route('/api/v1/auth/resend-verification', methods=['POST'])
+@limiter.limit("3 per minute")
+def resend_verification():
+    """
+    Resend the verification email for the current user.
+    Requires: Authorization: Bearer <token>
+    """
+    user = _get_current_user(request)
+    if not user:
+        return jsonify({'error': 'Unauthorized'}), 401
+    if user.get('email_verified'):
+        return jsonify({'message': 'Email already verified'}), 200
+
+    try:
+        token = create_email_verification_token(user['id'])
+        send_verification_email(user['email'], token)
+        return jsonify({'message': 'Verification email sent'})
+    except Exception as e:
+        return jsonify({'error': 'Failed to send email'}), 500
     """
     Revoke a refresh token so it can never be used again.
     Body: { "refresh_token": "..." }

@@ -1148,11 +1148,37 @@
             <label class="modal__label" for="modalEmail">Email</label>
             <input class="modal__input" type="email" id="modalEmail" placeholder="you@example.com" autocomplete="email" />
           </div>
-          <div class="modal__field">
+          <div class="modal__field" id="passwordField">
             <label class="modal__label" for="modalPassword">Password</label>
             <input class="modal__input" type="password" id="modalPassword" placeholder="••••••••" autocomplete="current-password" />
+            <button type="button" id="forgotPasswordBtn" style="background:none;border:none;color:#7C6FF7;font-size:12px;cursor:pointer;text-align:right;padding:4px 0;font-family:inherit;display:none;">Forgot password?</button>
           </div>
           <button class="modal__btn" id="modalAuthBtn">Sign in</button>
+        </div>
+
+        <!-- Forgot password form (shown when forgot password is clicked) -->
+        <div id="forgotPasswordSection" style="display:none">
+          <p style="font-size:14px;color:#9490A8;margin-bottom:16px;line-height:1.6;">Enter your email and we'll send you a link to reset your password.</p>
+          <div class="modal__field">
+            <label class="modal__label" for="forgotEmail">Email</label>
+            <input class="modal__input" type="email" id="forgotEmail" placeholder="you@example.com" autocomplete="email" />
+          </div>
+          <div class="modal__success" id="forgotSuccess" style="display:none;margin-top:12px;"></div>
+          <div class="modal__error" id="forgotError" style="display:none;margin-top:12px;"></div>
+          <button class="modal__btn" id="forgotSubmitBtn" style="margin-top:14px;">Send reset link</button>
+          <button type="button" id="backToLoginBtn" style="background:none;border:none;color:#9490A8;font-size:13px;cursor:pointer;padding:10px 0;font-family:inherit;width:100%;text-align:center;">← Back to sign in</button>
+        </div>
+
+        <!-- Reset password form (shown when reset_token in URL) -->
+        <div id="resetPasswordSection" style="display:none">
+          <p style="font-size:14px;color:#9490A8;margin-bottom:16px;line-height:1.6;">Enter your new password below.</p>
+          <div class="modal__field">
+            <label class="modal__label" for="resetPassword">New password</label>
+            <input class="modal__input" type="password" id="resetPassword" placeholder="••••••••" autocomplete="new-password" />
+          </div>
+          <div class="modal__success" id="resetSuccess" style="display:none;margin-top:12px;"></div>
+          <div class="modal__error" id="resetError" style="display:none;margin-top:12px;"></div>
+          <button class="modal__btn" id="resetSubmitBtn" style="margin-top:14px;">Set new password</button>
         </div>
       </div>
 
@@ -1160,6 +1186,10 @@
       <div class="modal__token-section" id="modalTokenSection">
         <div class="modal__success" id="modalLoginSuccess" style="display:block">
           ✅ Signed in successfully!
+        </div>
+        <!-- Email verification reminder -->
+        <div id="verifyEmailReminder" style="display:none;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.3);border-radius:8px;padding:12px 14px;margin-bottom:14px;">
+          <p style="margin:0;font-size:13px;color:#F59E0B;line-height:1.5;">📧 Check your inbox — we sent a verification email. <button id="resendVerifyBtn" style="background:none;border:none;color:#F59E0B;text-decoration:underline;cursor:pointer;font-size:13px;font-family:inherit;padding:0;">Resend</button></p>
         </div>
         <div class="modal__token-label">Your connection code</div>
         <div class="modal__token-box">
@@ -1257,14 +1287,131 @@
       modalSuccess.style.display = 'none';
     }
 
+    // Show forgot password button only on login tab
     function switchModalTab(tab) {
       currentTab = tab;
       document.getElementById('modalTabLogin').classList.toggle('is-active',  tab === 'login');
       document.getElementById('modalTabSignup').classList.toggle('is-active', tab === 'signup');
       modalAuthBtn.textContent = tab === 'login' ? 'Sign in' : 'Create account';
       document.getElementById('modalPassword').autocomplete = tab === 'login' ? 'current-password' : 'new-password';
+      document.getElementById('forgotPasswordBtn').style.display = tab === 'login' ? 'block' : 'none';
       clearModalMessages();
     }
+
+    // Forgot password flow
+    document.getElementById('forgotPasswordBtn').addEventListener('click', function() {
+      document.getElementById('modalAuthSection').querySelector('.modal__form').style.display = 'none';
+      document.getElementById('forgotPasswordSection').style.display = 'block';
+      document.getElementById('forgotEmail').value = document.getElementById('modalEmail').value;
+    });
+
+    document.getElementById('backToLoginBtn').addEventListener('click', function() {
+      document.getElementById('forgotPasswordSection').style.display = 'none';
+      document.getElementById('modalAuthSection').querySelector('.modal__form').style.display = 'flex';
+    });
+
+    document.getElementById('forgotSubmitBtn').addEventListener('click', function() {
+      var email = document.getElementById('forgotEmail').value.trim();
+      var btn   = this;
+      document.getElementById('forgotSuccess').style.display = 'none';
+      document.getElementById('forgotError').style.display   = 'none';
+
+      if (!email) {
+        document.getElementById('forgotError').textContent    = 'Please enter your email address.';
+        document.getElementById('forgotError').style.display  = 'block';
+        return;
+      }
+      btn.disabled    = true;
+      btn.textContent = 'Sending…';
+
+      fetch(API_BASE + '/api/v1/auth/forgot-password', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', 'X-API-Key': LUMIVEIL_KEY },
+        body:    JSON.stringify({ email: email })
+      })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        btn.disabled    = false;
+        btn.textContent = 'Send reset link';
+        document.getElementById('forgotSuccess').textContent   = data.message || 'Reset link sent! Check your inbox.';
+        document.getElementById('forgotSuccess').style.display = 'block';
+      })
+      .catch(function() {
+        btn.disabled    = false;
+        btn.textContent = 'Send reset link';
+        document.getElementById('forgotError').textContent    = 'Could not connect. Please try again.';
+        document.getElementById('forgotError').style.display  = 'block';
+      });
+    });
+
+    // Resend verification email
+    document.getElementById('resendVerifyBtn').addEventListener('click', function() {
+      var token = localStorage.getItem('lv_token');
+      if (!token) return;
+      this.textContent = 'Sending…';
+      var btn = this;
+      fetch(API_BASE + '/api/v1/auth/resend-verification', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', 'X-API-Key': LUMIVEIL_KEY, 'Authorization': 'Bearer ' + token }
+      })
+      .then(function() { btn.textContent = 'Sent!'; })
+      .catch(function() { btn.textContent = 'Resend'; });
+    });
+
+    // Handle reset_token in URL — open modal with reset form
+    (function() {
+      var urlParams = new URLSearchParams(window.location.search);
+      var resetToken = urlParams.get('reset_token');
+      if (resetToken) {
+        openModal();
+        document.getElementById('modalAuthSection').style.display = 'none';
+        document.getElementById('resetPasswordSection').style.display = 'block';
+
+        document.getElementById('resetSubmitBtn').addEventListener('click', function() {
+          var password = document.getElementById('resetPassword').value;
+          var btn      = this;
+          document.getElementById('resetSuccess').style.display = 'none';
+          document.getElementById('resetError').style.display   = 'none';
+
+          if (!password || password.length < 8) {
+            document.getElementById('resetError').textContent    = 'Password must be at least 8 characters.';
+            document.getElementById('resetError').style.display  = 'block';
+            return;
+          }
+          btn.disabled    = true;
+          btn.textContent = 'Resetting…';
+
+          fetch(API_BASE + '/api/v1/auth/reset-password', {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json', 'X-API-Key': LUMIVEIL_KEY },
+            body:    JSON.stringify({ token: resetToken, password: password })
+          })
+          .then(function(r) { return r.json(); })
+          .then(function(data) {
+            btn.disabled    = false;
+            btn.textContent = 'Set new password';
+            if (data.error) {
+              document.getElementById('resetError').textContent    = data.error;
+              document.getElementById('resetError').style.display  = 'block';
+            } else {
+              document.getElementById('resetSuccess').textContent   = '✅ Password reset! You can now sign in.';
+              document.getElementById('resetSuccess').style.display = 'block';
+              document.getElementById('resetPasswordSection').style.display  = 'none';
+              setTimeout(function() {
+                document.getElementById('modalAuthSection').style.display = 'block';
+                switchModalTab('login');
+              }, 2000);
+            }
+          })
+          .catch(function() {
+            btn.disabled    = false;
+            btn.textContent = 'Set new password';
+            document.getElementById('resetError').textContent    = 'Could not connect. Please try again.';
+            document.getElementById('resetError').style.display  = 'block';
+          });
+        });
+      }
+    })();
 
     function updateNavLoggedIn(user, token, refreshToken) {
       storedToken = token;
@@ -1405,6 +1552,10 @@
             sendTokensToExtension(res.data.token, res.data.refresh_token, res.data.user);
           } else {
             showTokenSection(res.data.token, res.data.refresh_token);
+            // Show verification reminder for new signups
+            if (currentTab === 'signup' && res.data.user && !res.data.user.email_verified) {
+              document.getElementById('verifyEmailReminder').style.display = 'block';
+            }
           }
         } else {
           showModalError(res.data.error || 'Something went wrong. Please try again.');
