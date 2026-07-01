@@ -423,10 +423,9 @@ Respond in this exact JSON format (no markdown, no backticks):
 }}"""
 
         resp = http_requests.post(
-            f'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}',
+            f'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={GEMINI_API_KEY}',
             json={
                 'contents': [{'parts': [{'text': prompt}]}],
-                'tools': [{'google_search': {}}],
                 'generationConfig': {
                     'temperature':     0.1,
                     'maxOutputTokens': 500
