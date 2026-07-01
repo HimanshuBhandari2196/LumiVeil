@@ -1150,7 +1150,10 @@
           </div>
           <div class="modal__field" id="passwordField">
             <label class="modal__label" for="modalPassword">Password</label>
-            <input class="modal__input" type="password" id="modalPassword" placeholder="••••••••" autocomplete="current-password" />
+            <div style="position:relative;">
+              <input class="modal__input" type="password" id="modalPassword" placeholder="••••••••" autocomplete="current-password" style="padding-right:44px;" />
+              <button type="button" id="toggleModalPwd" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:#9490A8;padding:0;font-size:13px;">👁</button>
+            </div>
             <button type="button" id="forgotPasswordBtn" style="background:none;border:none;color:#7C6FF7;font-size:12px;cursor:pointer;text-align:right;padding:4px 0;font-family:inherit;">Forgot password?</button>
           </div>
           <button class="modal__btn" id="modalAuthBtn">Sign in</button>
@@ -1307,6 +1310,13 @@
       document.getElementById('forgotPasswordBtn').style.display = tab === 'login' ? 'block' : 'none';
       clearModalMessages();
     }
+
+    // Password visibility toggle in sign in / create account modal
+    document.getElementById('toggleModalPwd').addEventListener('click', function() {
+      var inp = document.getElementById('modalPassword');
+      inp.type = inp.type === 'password' ? 'text' : 'password';
+      this.textContent = inp.type === 'password' ? '👁' : '🙈';
+    });
 
     // Forgot password flow
     document.getElementById('forgotPasswordBtn').addEventListener('click', function() {
