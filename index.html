@@ -1364,8 +1364,13 @@
       var resetToken = urlParams.get('reset_token');
       if (resetToken) {
         openModal();
-        document.getElementById('modalAuthSection').style.display = 'none';
-        document.getElementById('resetPasswordSection').style.display = 'block';
+        // Hide tabs and the auth form, but keep modalAuthSection visible
+        document.getElementById('modalTabLogin').style.display  = 'none';
+        document.getElementById('modalTabSignup').style.display = 'none';
+        document.getElementById('modalAuthSection').querySelector('.modal__form').style.display = 'none';
+        document.getElementById('forgotPasswordSection').style.display   = 'none';
+        document.getElementById('resetPasswordSection').style.display    = 'block';
+        document.querySelector('.modal__subtitle').textContent = 'Enter your new password below.';
 
         document.getElementById('resetSubmitBtn').addEventListener('click', function() {
           var password = document.getElementById('resetPassword').value;
@@ -1398,7 +1403,10 @@
               document.getElementById('resetSuccess').style.display = 'block';
               document.getElementById('resetPasswordSection').style.display  = 'none';
               setTimeout(function() {
-                document.getElementById('modalAuthSection').style.display = 'block';
+                document.getElementById('modalTabLogin').style.display  = '';
+                document.getElementById('modalTabSignup').style.display = '';
+                document.getElementById('modalAuthSection').querySelector('.modal__form').style.display = 'flex';
+                document.querySelector('.modal__subtitle').textContent = 'Sign in to access your account and get your extension token.';
                 switchModalTab('login');
               }, 2000);
             }
