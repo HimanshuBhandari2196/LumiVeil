@@ -160,6 +160,7 @@ def _security_headers(response):
 @app.route('/api/v1/auth/forgot-password', methods=['OPTIONS'])
 @app.route('/api/v1/auth/reset-password', methods=['OPTIONS'])
 @app.route('/api/v1/auth/resend-verification', methods=['OPTIONS'])
+@app.route('/api/v1/auth/delete-account', methods=['OPTIONS'])
 @app.route('/api/v1/analyze', methods=['OPTIONS'])
 @app.route('/api/v1/user/status', methods=['OPTIONS'])
 def handle_options():
@@ -1158,17 +1159,59 @@ def resend_verification():
         return jsonify({'message': 'Verification email sent'})
     except Exception as e:
         return jsonify({'error': 'Failed to send email'}), 500
+
+
+@app.route('/api/v1/auth/logout', methods=['POST'])
+def logout():
     """
     Revoke a refresh token so it can never be used again.
     Body: { "refresh_token": "..." }
-    Call this when the user clicks 'Sign out' so a stolen/old refresh token
-    can't keep minting new access tokens after they've signed out.
     """
     body = request.get_json(silent=True) or {}
     refresh_token = body.get('refresh_token', '')
     if refresh_token:
         revoke_refresh_token_plaintext(refresh_token)
     return jsonify({'status': 'signed out'})
+
+
+@app.route('/api/v1/auth/delete-account', methods=['POST'])
+@limiter.limit("3 per minute")
+def delete_account():
+    """
+    Permanently delete the current user's account and all associated data.
+    Requires: Authorization: Bearer <token>
+    Body: { "password": "..." } — password confirmation required
+    """
+    user = _get_current_user(request)
+    if not user:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    body     = request.get_json(silent=True) or {}
+    password = body.get('password', '')
+
+    if not password:
+        return jsonify({'error': 'Password confirmation required'}), 400
+
+    if not verify_password(password, user['password_hash']):
+        return jsonify({'error': 'Incorrect password'}), 401
+
+    try:
+        from database import get_db
+        conn    = get_db()
+        cur     = conn.cursor()
+        user_id = user['id']
+
+        cur.execute("DELETE FROM refresh_tokens WHERE user_id = %s",      (user_id,))
+        cur.execute("DELETE FROM email_verifications WHERE user_id = %s", (user_id,))
+        cur.execute("DELETE FROM password_resets WHERE user_id = %s",     (user_id,))
+        cur.execute("DELETE FROM usage WHERE user_id = %s",               (user_id,))
+        cur.execute("DELETE FROM payments WHERE user_id = %s",            (user_id,))
+        cur.execute("DELETE FROM users WHERE id = %s",                    (user_id,))
+        conn.commit()
+        cur.close(); conn.close()
+        return jsonify({'message': 'Account deleted successfully'})
+    except Exception as e:
+        return jsonify({'error': f'Failed to delete account: {str(e)[:80]}'}), 500
 
 
 @app.route('/api/v1/user/status', methods=['GET'])

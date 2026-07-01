@@ -705,7 +705,14 @@
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
             My token
           </button>
-          <button class="nav__signout" id="navSignOutBtn">Sign out</button>
+          <div style="position:relative;">
+            <button class="nav__signout" id="navProfileBtn" style="color:var(--muted);border:1px solid var(--border);border-radius:100px;padding:6px 12px;font-size:12px;background:transparent;cursor:pointer;transition:all 0.2s;" onmouseover="document.getElementById('profileDropdown').style.display='block'" >Account ▾</button>
+            <div id="profileDropdown" style="display:none;position:absolute;right:0;top:100%;margin-top:6px;background:#17171E;border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:6px;min-width:160px;z-index:999;box-shadow:0 8px 24px rgba(0,0,0,0.4);" onmouseleave="this.style.display='none'">
+              <button id="navSignOutBtn" style="display:block;width:100%;text-align:left;background:none;border:none;color:#9490A8;font-size:13px;font-family:inherit;padding:8px 12px;border-radius:7px;cursor:pointer;transition:background 0.15s;" onmouseover="this.style.background='rgba(255,255,255,0.05)'" onmouseout="this.style.background='none'">Sign out</button>
+              <div style="height:1px;background:rgba(255,255,255,0.06);margin:4px 0;"></div>
+              <button id="deleteAccountBtn" style="display:block;width:100%;text-align:left;background:none;border:none;color:#EF4444;font-size:13px;font-family:inherit;padding:8px 12px;border-radius:7px;cursor:pointer;transition:background 0.15s;" onmouseover="this.style.background='rgba(239,68,68,0.08)'" onmouseout="this.style.background='none'">Delete account</button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -1110,8 +1117,8 @@
       <div class="footer__bottom">
         <p class="footer__copy">© 2026 LumiVeil · Open source under MIT License</p>
         <ul class="footer__legal">
-          <li><a href="#">Privacy</a></li>
-          <li><a href="#">Terms</a></li>
+          <li><a href="privacy.html">Privacy</a></li>
+          <li><a href="terms.html">Terms</a></li>
         </ul>
       </div>
     </div>
@@ -1615,6 +1622,58 @@
       });
     });
 
+    // Delete account
+    document.getElementById('deleteAccountBtn').addEventListener('click', function() {
+      document.getElementById('profileDropdown').style.display = 'none';
+      document.getElementById('deleteModal').style.display     = 'flex';
+      document.getElementById('deletePasswordInput').value     = '';
+      document.getElementById('deleteError').style.display     = 'none';
+    });
+
+    document.getElementById('deleteCancelBtn').addEventListener('click', function() {
+      document.getElementById('deleteModal').style.display = 'none';
+    });
+
+    document.getElementById('deleteConfirmBtn').addEventListener('click', function() {
+      var password = document.getElementById('deletePasswordInput').value;
+      var btn      = this;
+      var token    = localStorage.getItem('lv_token');
+      document.getElementById('deleteError').style.display = 'none';
+
+      if (!password) {
+        document.getElementById('deleteError').textContent   = 'Please enter your password to confirm.';
+        document.getElementById('deleteError').style.display = 'block';
+        return;
+      }
+      btn.disabled    = true;
+      btn.textContent = 'Deleting…';
+
+      fetch(API_BASE + '/api/v1/auth/delete-account', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', 'X-API-Key': LUMIVEIL_KEY, 'Authorization': 'Bearer ' + token },
+        body:    JSON.stringify({ password: password })
+      })
+      .then(function(r) { return r.json().then(function(d) { return { status: r.status, data: d }; }); })
+      .then(function(res) {
+        btn.disabled    = false;
+        btn.textContent = 'Delete account';
+        if (res.status === 200) {
+          document.getElementById('deleteModal').style.display = 'none';
+          updateNavLoggedOut();
+          alert('Your account has been deleted. We\'re sorry to see you go.');
+        } else {
+          document.getElementById('deleteError').textContent   = res.data.error || 'Something went wrong. Please try again.';
+          document.getElementById('deleteError').style.display = 'block';
+        }
+      })
+      .catch(function() {
+        btn.disabled    = false;
+        btn.textContent = 'Delete account';
+        document.getElementById('deleteError').textContent   = 'Could not connect. Please try again.';
+        document.getElementById('deleteError').style.display = 'block';
+      });
+    });
+
     // Restore session on page load + auto-open modal if opened from extension
     (function() {
       var token   = localStorage.getItem('lv_token');
@@ -1632,7 +1691,23 @@
 
   </script>
 
-  <!-- Google Translate — free, no API key needed -->
+  <!-- DELETE ACCOUNT MODAL -->
+  <div id="deleteModal" style="display:none;position:fixed;inset:0;z-index:1001;background:rgba(0,0,0,0.75);backdrop-filter:blur(6px);display:none;align-items:center;justify-content:center;padding:20px;">
+    <div style="background:#17171E;border:1px solid rgba(239,68,68,0.3);border-radius:20px;padding:36px 32px;width:100%;max-width:400px;box-shadow:0 24px 64px rgba(0,0,0,0.6);">
+      <h2 style="font-size:20px;font-weight:600;color:#fff;margin-bottom:10px;">Delete your account?</h2>
+      <p style="font-size:14px;color:#9490A8;line-height:1.6;margin-bottom:24px;">This will permanently delete your account and all associated data. This action cannot be undone.</p>
+      <div style="margin-bottom:16px;">
+        <label style="font-size:12px;font-weight:600;color:#9490A8;letter-spacing:0.04em;display:block;margin-bottom:6px;">Confirm your password</label>
+        <input type="password" id="deletePasswordInput" placeholder="••••••••"
+          style="width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:11px 14px;font-size:14px;font-family:inherit;color:#fff;outline:none;" />
+      </div>
+      <div id="deleteError" style="display:none;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.25);border-radius:8px;padding:10px 14px;font-size:13px;color:#EF4444;margin-bottom:16px;"></div>
+      <div style="display:flex;gap:10px;">
+        <button id="deleteCancelBtn" style="flex:1;padding:12px;border-radius:10px;background:transparent;border:1px solid rgba(255,255,255,0.1);color:#9490A8;font-size:14px;font-weight:600;font-family:inherit;cursor:pointer;">Cancel</button>
+        <button id="deleteConfirmBtn" style="flex:1;padding:12px;border-radius:10px;background:#EF4444;border:none;color:#fff;font-size:14px;font-weight:600;font-family:inherit;cursor:pointer;">Delete account</button>
+      </div>
+    </div>
+  </div>
   <script>
     function googleTranslateElementInit() {
       new google.translate.TranslateElement({
