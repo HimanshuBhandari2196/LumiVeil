@@ -656,15 +656,32 @@ def check_url_credibility(url, locale=None):
 
     # -- Trusted domains by region --
     global_credible = [
-        'reuters.com', 'apnews.com', 'bbc.com', 'theguardian.com',
+        # International wire services & broadcasters
+        'reuters.com', 'apnews.com', 'bbc.com', 'bbc.co.uk', 'theguardian.com',
         'aljazeera.com', 'dw.com', 'france24.com', 'euronews.com',
+        # Science & academic
         'nature.com', 'science.org', 'scientificamerican.com',
         'newscientist.com', 'arxiv.org', 'pubmed.ncbi.nlm.nih.gov',
+        # International organisations
         'who.int', 'un.org', 'unesco.org', 'unicef.org',
         'worldbank.org', 'imf.org', 'nato.int',
+        # Fact-checkers
         'snopes.com', 'factcheck.org', 'politifact.com',
         'fullfact.org', 'boomlive.in', 'altnews.in',
         'thelogicalindian.com', 'vishvasnews.com',
+        # Major sports news
+        'espn.com', 'espn.in', 'espncricinfo.com',
+        'skysports.com', 'goal.com', 'bleacherreport.com',
+        'theathletic.com', 'sportbible.com', 'marca.com',
+        'as.com', 'gazzetta.it', 'lequipe.fr',
+        'cricbuzz.com', 'icc-cricket.com', 'fifa.com',
+        'uefa.com', 'olympics.com', 'nba.com', 'nfl.com',
+        'formula1.com', 'wimbledon.com', 'bcci.tv',
+        # Major general & business news
+        'economist.com', 'bloomberg.com', 'ft.com',
+        'cnbc.com', 'forbes.com', 'businessinsider.com',
+        'vox.com', 'foreignpolicy.com', 'foreignaffairs.com',
+        # LumiVeil own domains
         'himanshubhandari2196.github.io',
         'github.io', 'github.com',
         'railway.app',
