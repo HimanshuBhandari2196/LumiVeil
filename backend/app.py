@@ -83,6 +83,8 @@ IMAGE_ANALYSIS_PROVIDER = os.environ.get('IMAGE_ANALYSIS_PROVIDER', 'sightengine
 # Provider credentials
 SIGHTENGINE_API_USER   = os.environ.get('SIGHTENGINE_API_USER', '')
 SIGHTENGINE_API_SECRET = os.environ.get('SIGHTENGINE_API_SECRET', '')
+GEMINI_API_KEY         = os.environ.get('GEMINI_API_KEY', '')
+GOOGLE_FACTCHECK_KEY   = os.environ.get('GOOGLE_FACTCHECK_KEY', '')
 # HIVE_API_KEY         = os.environ.get('HIVE_API_KEY', '')   # uncomment for Hive
 
 
@@ -349,6 +351,151 @@ def analyze_image_metadata(image_url):
         return 0, [f'⚠️ Metadata analysis error: {exc}']
 
 
+def check_with_google_factcheck(claim):
+    """
+    Search Google's Fact Check Tools API for existing fact-checks on a claim.
+    Returns (found: bool, results: list[dict]) where each result has:
+      { publisher, title, url, rating, claim_reviewed }
+    Docs: https://developers.google.com/fact-check/tools/api
+    """
+    if not GOOGLE_FACTCHECK_KEY:
+        return False, []
+
+    try:
+        resp = http_requests.get(
+            'https://factchecktools.googleapis.com/v1alpha1/claims:search',
+            params={
+                'query':        claim[:500],
+                'key':          GOOGLE_FACTCHECK_KEY,
+                'languageCode': 'en',
+                'pageSize':     5
+            },
+            timeout=10
+        )
+        if resp.status_code != 200:
+            return False, []
+
+        data   = resp.json()
+        claims = data.get('claims', [])
+        if not claims:
+            return False, []
+
+        results = []
+        for c in claims:
+            review = c.get('claimReview', [{}])[0]
+            results.append({
+                'claim_reviewed': c.get('text', ''),
+                'publisher':      review.get('publisher', {}).get('name', 'Unknown'),
+                'title':          review.get('title', ''),
+                'url':            review.get('url', ''),
+                'rating':         review.get('textualRating', 'Unknown')
+            })
+        return True, results
+
+    except Exception:
+        return False, []
+
+
+def analyze_with_gemini(claim, context=''):
+    """
+    Use Gemini Flash with Google Search grounding to fact-check a claim.
+    Returns (score_adjustment: int, flags: list[str], summary: str)
+
+    score_adjustment is positive (credible) or negative (questionable).
+    Falls back gracefully if API key missing or quota exceeded.
+    """
+    if not GEMINI_API_KEY:
+        return 0, [], ''
+
+    try:
+        prompt = f"""You are a fact-checker. Analyze this claim and determine if it is likely true, false, or unverifiable.
+
+CLAIM: {claim}
+{f'CONTEXT: {context}' if context else ''}
+
+Respond in this exact JSON format (no markdown, no backticks):
+{{
+  "verdict": "true" | "false" | "misleading" | "unverifiable",
+  "confidence": 0-100,
+  "reasoning": "1-2 sentence explanation",
+  "red_flags": ["list", "of", "specific", "issues"] or [],
+  "sources_to_check": ["suggested", "sources"] or []
+}}"""
+
+        resp = http_requests.post(
+            f'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}',
+            json={
+                'contents': [{'parts': [{'text': prompt}]}],
+                'tools': [{'google_search': {}}],
+                'generationConfig': {
+                    'temperature':     0.1,
+                    'maxOutputTokens': 500
+                }
+            },
+            timeout=20
+        )
+
+        if resp.status_code != 200:
+            return 0, [f'⚠️ AI fact-check unavailable (status {resp.status_code})'], ''
+
+        data = resp.json()
+        text = ''
+        for part in data.get('candidates', [{}])[0].get('content', {}).get('parts', []):
+            if 'text' in part:
+                text += part['text']
+
+        if not text:
+            return 0, [], ''
+
+        # Clean and parse JSON response
+        text = text.strip()
+        if text.startswith('```'):
+            text = text.split('```')[1]
+            if text.startswith('json'):
+                text = text[4:]
+        text = text.strip()
+
+        try:
+            result = json.loads(text)
+        except json.JSONDecodeError:
+            return 0, ['ℹ️ AI analysis completed but response was unclear'], ''
+
+        verdict    = result.get('verdict', 'unverifiable')
+        confidence = int(result.get('confidence', 50))
+        reasoning  = result.get('reasoning', '')
+        red_flags  = result.get('red_flags', [])
+        sources    = result.get('sources_to_check', [])
+
+        flags = []
+        score_adjustment = 0
+
+        if verdict == 'true':
+            score_adjustment = max(10, int(confidence * 0.3))
+            flags.append(f'✅ AI fact-check: Likely true (confidence: {confidence}%)')
+        elif verdict == 'false':
+            score_adjustment = -max(20, int(confidence * 0.5))
+            flags.append(f'❌ AI fact-check: Likely false (confidence: {confidence}%)')
+        elif verdict == 'misleading':
+            score_adjustment = -15
+            flags.append(f'⚠️ AI fact-check: Misleading or missing context (confidence: {confidence}%)')
+        else:
+            flags.append(f'ℹ️ AI fact-check: Could not verify this claim (confidence: {confidence}%)')
+
+        if reasoning:
+            flags.append(f'💭 {reasoning}')
+
+        for flag in red_flags[:3]:
+            flags.append(f'🚩 {flag}')
+
+        if sources:
+            flags.append(f'🔍 Suggested sources: {", ".join(sources[:3])}')
+
+        return score_adjustment, flags, reasoning
+
+    except Exception as e:
+        return 0, [f'⚠️ AI fact-check error: {str(e)[:80]}'], ''
+
+
 # ===========================================================================
 # 4. CONTENT ANALYSIS
 # ===========================================================================
@@ -575,12 +722,16 @@ def check_url_credibility(url, locale=None):
             flags.append(f'❌ Known fake-news domain: {domain}')
             return max(0, score), flags
 
-    # Social media note
+    # Social media — early return with honest "unverifiable" verdict
+    # Social media content can be real or fake — we can't determine which.
+    # Returning a fixed 45 score (mixed) with a clear explanation is more
+    # honest than penalising it and potentially calling real content fake.
     for platform in social_media:
         if platform in url_low:
-            flags.append(f'⚠️ Content from social media ({platform}) — verify with a news source')
-            score -= 5
-            break
+            flags.append(f'⚠️ Content from social media ({platform})')
+            flags.append('ℹ️ Social media posts cannot be independently verified by LumiVeil')
+            flags.append('💡 Cross-check with the original news source or official account')
+            return 45, flags   # Fixed mixed score — honest about limitations
 
     # Regional source check — higher bonus than generic global match
     matched = False
@@ -993,12 +1144,64 @@ def analyze():
         if page_text:
             sensational_count, sens_flags = check_sensationalism(page_text)
             all_flags.extend(sens_flags)
+
+            # For social media URLs, also run Gemini fact-check on the page text
+            social_domains = ['twitter.com', 'x.com', 'facebook.com', 'instagram.com',
+                            'reddit.com', 'tiktok.com', 'linkedin.com', 'telegram.org']
+            is_social = any(d in user_input.lower() for d in social_domains)
+            if is_social and page_text:
+                all_flags.append('🔍 Running AI fact-check on social media content...')
+                # Google Fact Check first
+                found, fc_results = check_with_google_factcheck(page_text[:300])
+                if found:
+                    for r in fc_results[:2]:
+                        rating = r.get('rating', 'Unknown')
+                        publisher = r.get('publisher', 'Unknown')
+                        all_flags.append(f'📋 Fact-checked by {publisher}: "{rating}"')
+                        if any(w in rating.lower() for w in ['false', 'fake', 'incorrect', 'misleading']):
+                            url_score -= 25
+                        elif any(w in rating.lower() for w in ['true', 'correct', 'accurate']):
+                            url_score += 15
+                else:
+                    # Fall back to Gemini
+                    score_adj, gemini_flags, _ = analyze_with_gemini(page_text[:500])
+                    url_score = max(0, min(100, url_score + score_adj))
+                    all_flags.extend(gemini_flags)
         else:
             all_flags.append('⚠️ Could not fetch page content for text analysis')
 
     else:
+        # Plain text or social media post pasted directly
         sensational_count, sens_flags = check_sensationalism(user_input)
         all_flags.extend(sens_flags)
+
+        # Run Google Fact Check first
+        all_flags.append('🔍 Searching fact-checker database...')
+        found, fc_results = check_with_google_factcheck(user_input)
+
+        if found:
+            all_flags.append(f'📋 Found {len(fc_results)} existing fact-check(s):')
+            for r in fc_results[:3]:
+                rating    = r.get('rating', 'Unknown')
+                publisher = r.get('publisher', 'Unknown')
+                title     = r.get('title', '')
+                all_flags.append(f'  • {publisher}: "{rating}"')
+                if title:
+                    all_flags.append(f'    "{title[:80]}"')
+                # Adjust score based on rating
+                rating_low = rating.lower()
+                if any(w in rating_low for w in ['false', 'fake', 'incorrect', 'misleading', 'pants on fire']):
+                    url_score -= 30
+                elif any(w in rating_low for w in ['true', 'correct', 'accurate', 'verified']):
+                    url_score += 20
+                elif any(w in rating_low for w in ['mixed', 'partly', 'partially', 'missing context']):
+                    url_score -= 10
+        else:
+            all_flags.append('ℹ️ No existing fact-checks found — running AI analysis...')
+            # Run Gemini with Google Search grounding
+            score_adj, gemini_flags, gemini_summary = analyze_with_gemini(user_input)
+            url_score = max(0, min(100, 50 + score_adj))
+            all_flags.extend(gemini_flags)
 
     # -- Score + verdict --
     final_score = calculate_final_score(url_score, sensational_count, all_flags)
