@@ -1175,7 +1175,17 @@
         <p style="font-size:14px;color:#9490A8;margin-bottom:16px;line-height:1.6;">Enter your new password below.</p>
         <div class="modal__field">
           <label class="modal__label" for="resetPassword">New password</label>
-          <input class="modal__input" type="password" id="resetPassword" placeholder="••••••••" autocomplete="new-password" />
+          <div style="position:relative;">
+            <input class="modal__input" type="password" id="resetPassword" placeholder="••••••••" autocomplete="new-password" style="padding-right:44px;" />
+            <button type="button" id="toggleResetPwd" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:#9490A8;padding:0;font-size:13px;">👁</button>
+          </div>
+        </div>
+        <div class="modal__field" style="margin-top:14px;">
+          <label class="modal__label" for="resetPasswordConfirm">Confirm new password</label>
+          <div style="position:relative;">
+            <input class="modal__input" type="password" id="resetPasswordConfirm" placeholder="••••••••" autocomplete="new-password" style="padding-right:44px;" />
+            <button type="button" id="toggleResetPwdConfirm" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:#9490A8;padding:0;font-size:13px;">👁</button>
+          </div>
         </div>
         <div class="modal__success" id="resetSuccess" style="display:none;margin-top:12px;"></div>
         <div class="modal__error" id="resetError" style="display:none;margin-top:12px;"></div>
@@ -1368,15 +1378,33 @@
         document.getElementById('resetPasswordSection').style.display = 'block';
         document.querySelector('.modal__subtitle').textContent = 'Enter your new password below.';
 
+        document.getElementById('toggleResetPwd').addEventListener('click', function() {
+          var inp = document.getElementById('resetPassword');
+          inp.type = inp.type === 'password' ? 'text' : 'password';
+          this.textContent = inp.type === 'password' ? '👁' : '🙈';
+        });
+
+        document.getElementById('toggleResetPwdConfirm').addEventListener('click', function() {
+          var inp = document.getElementById('resetPasswordConfirm');
+          inp.type = inp.type === 'password' ? 'text' : 'password';
+          this.textContent = inp.type === 'password' ? '👁' : '🙈';
+        });
+
         document.getElementById('resetSubmitBtn').addEventListener('click', function() {
-          var password = document.getElementById('resetPassword').value;
-          var btn      = this;
+          var password        = document.getElementById('resetPassword').value;
+          var passwordConfirm = document.getElementById('resetPasswordConfirm').value;
+          var btn             = this;
           document.getElementById('resetSuccess').style.display = 'none';
           document.getElementById('resetError').style.display   = 'none';
 
           if (!password || password.length < 8) {
-            document.getElementById('resetError').textContent    = 'Password must be at least 8 characters.';
-            document.getElementById('resetError').style.display  = 'block';
+            document.getElementById('resetError').textContent   = 'Password must be at least 8 characters.';
+            document.getElementById('resetError').style.display = 'block';
+            return;
+          }
+          if (password !== passwordConfirm) {
+            document.getElementById('resetError').textContent   = 'Passwords do not match. Please try again.';
+            document.getElementById('resetError').style.display = 'block';
             return;
           }
           btn.disabled    = true;
