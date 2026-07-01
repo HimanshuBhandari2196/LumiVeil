@@ -436,20 +436,35 @@ Respond in this exact JSON format (no markdown, no backticks):
                     'maxOutputTokens': 500
                 }
             },
-            timeout=20
+            timeout=30
         )
 
         if resp.status_code != 200:
-            return 0, [f'⚠️ AI fact-check unavailable (status {resp.status_code})'], ''
+            return 0, [f'⚠️ AI fact-check unavailable (status {resp.status_code}): {resp.text[:100]}'], ''
 
         data = resp.json()
         text = ''
-        for part in data.get('candidates', [{}])[0].get('content', {}).get('parts', []):
+
+        # Gemini with search grounding may return content in different structures
+        candidates = data.get('candidates', [])
+        if not candidates:
+            return 0, ['⚠️ AI fact-check returned no candidates'], ''
+
+        candidate = candidates[0]
+        content   = candidate.get('content', {})
+        parts     = content.get('parts', [])
+
+        for part in parts:
             if 'text' in part:
                 text += part['text']
 
         if not text:
-            return 0, [], ''
+            # Try alternate structure
+            if 'text' in candidate:
+                text = candidate['text']
+
+        if not text:
+            return 0, ['ℹ️ AI analysis completed — no text response received'], ''
 
         # Clean and parse JSON response
         text = text.strip()
