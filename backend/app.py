@@ -407,8 +407,7 @@ def analyze_with_gemini(claim, context=''):
     if not GEMINI_API_KEY:
         return 0, [], ''
 
-    try:
-        prompt = f"""You are a fact-checker. Analyze this claim and determine if it is likely true, false, or unverifiable.
+    prompt = f"""You are a fact-checker. Analyze this claim and determine if it is likely true, false, or unverifiable.
 
 CLAIM: {claim}
 {f'CONTEXT: {context}' if context else ''}
@@ -422,25 +421,40 @@ Respond in this exact JSON format (no markdown, no backticks):
   "sources_to_check": ["suggested", "sources"] or []
 }}"""
 
-        resp = http_requests.post(
-            'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
-            headers={
-                'x-goog-api-key': GEMINI_API_KEY,
-                'Content-Type': 'application/json'
-            },
-            json={
-                'contents': [{'parts': [{'text': prompt}]}],
-                'tools': [{'google_search': {}}],
-                'generationConfig': {
-                    'temperature':     0.1,
-                    'maxOutputTokens': 500
-                }
-            },
-            timeout=30
-        )
+    GEMINI_MODELS = [
+        'gemini-2.5-flash',
+        'gemini-2.0-flash',
+        'gemini-1.5-flash',
+    ]
 
-        if resp.status_code != 200:
-            return 0, [f'⚠️ AI fact-check unavailable (status {resp.status_code}): {resp.text[:100]}'], ''
+    try:
+        resp = None
+        for model in GEMINI_MODELS:
+            resp = http_requests.post(
+                f'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent',
+                headers={
+                    'x-goog-api-key': GEMINI_API_KEY,
+                    'Content-Type': 'application/json'
+                },
+                json={
+                    'contents': [{'parts': [{'text': prompt}]}],
+                    'tools': [{'google_search': {}}],
+                    'generationConfig': {
+                        'temperature':     0.1,
+                        'maxOutputTokens': 500
+                    }
+                },
+                timeout=30
+            )
+            if resp.status_code == 200:
+                break
+            elif resp.status_code == 503:
+                continue  # Try next model
+            else:
+                return 0, [f'⚠️ AI fact-check unavailable (status {resp.status_code}): {resp.text[:100]}'], ''
+
+        if not resp or resp.status_code != 200:
+            return 0, ['⚠️ AI fact-check temporarily unavailable — all models overloaded. Try again shortly.'], ''
 
         data = resp.json()
         text = ''
