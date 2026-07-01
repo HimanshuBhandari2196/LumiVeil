@@ -1168,18 +1168,18 @@
           <button class="modal__btn" id="forgotSubmitBtn" style="margin-top:14px;">Send reset link</button>
           <button type="button" id="backToLoginBtn" style="background:none;border:none;color:#9490A8;font-size:13px;cursor:pointer;padding:10px 0;font-family:inherit;width:100%;text-align:center;">← Back to sign in</button>
         </div>
+      </div>
 
-        <!-- Reset password form (shown when reset_token in URL) -->
-        <div id="resetPasswordSection" style="display:none">
-          <p style="font-size:14px;color:#9490A8;margin-bottom:16px;line-height:1.6;">Enter your new password below.</p>
-          <div class="modal__field">
-            <label class="modal__label" for="resetPassword">New password</label>
-            <input class="modal__input" type="password" id="resetPassword" placeholder="••••••••" autocomplete="new-password" />
-          </div>
-          <div class="modal__success" id="resetSuccess" style="display:none;margin-top:12px;"></div>
-          <div class="modal__error" id="resetError" style="display:none;margin-top:12px;"></div>
-          <button class="modal__btn" id="resetSubmitBtn" style="margin-top:14px;">Set new password</button>
+      <!-- Reset password form — outside modalAuthSection so it's not hidden by showTokenSection -->
+      <div id="resetPasswordSection" style="display:none">
+        <p style="font-size:14px;color:#9490A8;margin-bottom:16px;line-height:1.6;">Enter your new password below.</p>
+        <div class="modal__field">
+          <label class="modal__label" for="resetPassword">New password</label>
+          <input class="modal__input" type="password" id="resetPassword" placeholder="••••••••" autocomplete="new-password" />
         </div>
+        <div class="modal__success" id="resetSuccess" style="display:none;margin-top:12px;"></div>
+        <div class="modal__error" id="resetError" style="display:none;margin-top:12px;"></div>
+        <button class="modal__btn" id="resetSubmitBtn" style="margin-top:14px;">Set new password</button>
       </div>
 
       <!-- Token section (shown after login) -->
@@ -1359,17 +1359,13 @@
     });
 
     // Handle reset_token in URL — open modal with reset form
-    (function() {
-      var urlParams = new URLSearchParams(window.location.search);
+    setTimeout(function() {
+      var urlParams  = new URLSearchParams(window.location.search);
       var resetToken = urlParams.get('reset_token');
       if (resetToken) {
         openModal();
-        // Hide tabs and the auth form, but keep modalAuthSection visible
-        document.getElementById('modalTabLogin').style.display  = 'none';
-        document.getElementById('modalTabSignup').style.display = 'none';
-        document.getElementById('modalAuthSection').querySelector('.modal__form').style.display = 'none';
-        document.getElementById('forgotPasswordSection').style.display   = 'none';
-        document.getElementById('resetPasswordSection').style.display    = 'block';
+        document.getElementById('modalAuthSection').style.display  = 'none';
+        document.getElementById('resetPasswordSection').style.display = 'block';
         document.querySelector('.modal__subtitle').textContent = 'Enter your new password below.';
 
         document.getElementById('resetSubmitBtn').addEventListener('click', function() {
@@ -1401,11 +1397,9 @@
             } else {
               document.getElementById('resetSuccess').textContent   = '✅ Password reset! You can now sign in.';
               document.getElementById('resetSuccess').style.display = 'block';
-              document.getElementById('resetPasswordSection').style.display  = 'none';
+              document.getElementById('resetPasswordSection').style.display = 'none';
               setTimeout(function() {
-                document.getElementById('modalTabLogin').style.display  = '';
-                document.getElementById('modalTabSignup').style.display = '';
-                document.getElementById('modalAuthSection').querySelector('.modal__form').style.display = 'flex';
+                document.getElementById('modalAuthSection').style.display = 'block';
                 document.querySelector('.modal__subtitle').textContent = 'Sign in to access your account and get your extension token.';
                 switchModalTab('login');
               }, 2000);
@@ -1419,7 +1413,7 @@
           });
         });
       }
-    })();
+    }, 100);
 
     function updateNavLoggedIn(user, token, refreshToken) {
       storedToken = token;
