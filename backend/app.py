@@ -39,7 +39,7 @@ from PIL import Image
 import os
 from dotenv import load_dotenv
 from database import init_db, get_user_by_email, create_user, check_usage_allowed, increment_usage, TIER_LIMITS, get_usage_today, update_last_login
-from auth import hash_password, verify_password, generate_token, get_user_from_token
+from auth import hash_password, verify_password, generate_token, get_user_from_token, issue_token_pair, refresh_access_token, revoke_refresh_token_plaintext
 
 load_dotenv()
 
@@ -151,6 +151,8 @@ def _security_headers(response):
 
 @app.route('/api/v1/auth/signup', methods=['OPTIONS'])
 @app.route('/api/v1/auth/login', methods=['OPTIONS'])
+@app.route('/api/v1/auth/refresh', methods=['OPTIONS'])
+@app.route('/api/v1/auth/logout', methods=['OPTIONS'])
 @app.route('/api/v1/analyze', methods=['OPTIONS'])
 @app.route('/api/v1/user/status', methods=['OPTIONS'])
 def handle_options():
@@ -647,7 +649,11 @@ def signup():
     """
     Register a new user.
     Body: { "email": "...", "password": "..." }
-    Returns: { "token": "...", "user": { id, email, tier } }
+    Returns: { "token": "...", "refresh_token": "...", "user": { id, email, tier } }
+
+    "token" is a short-lived (1hr) access token, sent with every /analyze request.
+    "refresh_token" is long-lived (60 days) — store it, and use it to silently
+    get a new access token via /api/v1/auth/refresh when the old one expires.
     """
     body = request.get_json(silent=True)
     if not body:
@@ -666,10 +672,11 @@ def signup():
     if user_id is None:
         return jsonify({'error': 'An account with this email already exists'}), 409
 
-    token = generate_token(user_id, email, 'free')
+    tokens = issue_token_pair(user_id, email, 'free')
     return jsonify({
-        'token': token,
-        'user':  {'id': user_id, 'email': email, 'tier': 'free'}
+        'token':         tokens['access_token'],
+        'refresh_token': tokens['refresh_token'],
+        'user':          {'id': user_id, 'email': email, 'tier': 'free'}
     }), 201
 
 
@@ -679,7 +686,7 @@ def login():
     """
     Login with email + password.
     Body: { "email": "...", "password": "..." }
-    Returns: { "token": "...", "user": { id, email, tier } }
+    Returns: { "token": "...", "refresh_token": "...", "user": { id, email, tier } }
     """
     body = request.get_json(silent=True)
     if not body:
@@ -694,11 +701,54 @@ def login():
 
     update_last_login(user['id'])
 
-    token = generate_token(user['id'], user['email'], user['tier'])
+    tokens = issue_token_pair(user['id'], user['email'], user['tier'])
     return jsonify({
-        'token': token,
-        'user':  {'id': user['id'], 'email': user['email'], 'tier': user['tier']}
+        'token':         tokens['access_token'],
+        'refresh_token': tokens['refresh_token'],
+        'user':          {'id': user['id'], 'email': user['email'], 'tier': user['tier']}
     })
+
+
+@app.route('/api/v1/auth/refresh', methods=['POST'])
+@limiter.limit("30 per minute")
+def refresh():
+    """
+    Exchange a valid refresh token for a brand new access token.
+    Body: { "refresh_token": "..." }
+    Returns: { "token": "..." }
+
+    The extension/website calls this automatically and silently whenever an
+    access token has expired — the user is never shown a login screen unless
+    the refresh token itself has expired (60 days) or been revoked.
+    """
+    body = request.get_json(silent=True)
+    if not body:
+        return jsonify({'error': 'Request body must be JSON'}), 400
+
+    refresh_token = body.get('refresh_token', '')
+    if not refresh_token:
+        return jsonify({'error': 'refresh_token is required'}), 400
+
+    try:
+        new_access_token = refresh_access_token(refresh_token)
+        return jsonify({'token': new_access_token})
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 401
+
+
+@app.route('/api/v1/auth/logout', methods=['POST'])
+def logout():
+    """
+    Revoke a refresh token so it can never be used again.
+    Body: { "refresh_token": "..." }
+    Call this when the user clicks 'Sign out' so a stolen/old refresh token
+    can't keep minting new access tokens after they've signed out.
+    """
+    body = request.get_json(silent=True) or {}
+    refresh_token = body.get('refresh_token', '')
+    if refresh_token:
+        revoke_refresh_token_plaintext(refresh_token)
+    return jsonify({'status': 'signed out'})
 
 
 @app.route('/api/v1/user/status', methods=['GET'])

@@ -58,6 +58,18 @@ CREATE TABLE IF NOT EXISTS payments (
     created_at   TEXT    NOT NULL,
     FOREIGN KEY (user_id) REFERENCES users(id)
 );
+
+-- Refresh tokens — long-lived, used only to mint new access tokens.
+-- Stored hashed (never plaintext) so a DB leak doesn't expose usable tokens.
+CREATE TABLE IF NOT EXISTS refresh_tokens (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER NOT NULL,
+    token_hash  TEXT    NOT NULL UNIQUE,
+    created_at  TEXT    NOT NULL,
+    expires_at  TEXT    NOT NULL,
+    revoked     INTEGER NOT NULL DEFAULT 0,   -- 1 = revoked (signed out / rotated)
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
 """
 
 # ---------------------------------------------------------------------------
@@ -258,3 +270,48 @@ def record_payment(user_id, amount, currency, provider, provider_id, tier):
     conn.close()
     # Upgrade the user's tier immediately
     set_user_tier(user_id, tier)
+
+
+# ---------------------------------------------------------------------------
+# REFRESH TOKEN HELPERS
+# ---------------------------------------------------------------------------
+
+def store_refresh_token(user_id, token_hash, expires_at):
+    """Insert a new refresh token record (hashed, never plaintext)."""
+    conn = get_db()
+    conn.execute("""
+        INSERT INTO refresh_tokens (user_id, token_hash, created_at, expires_at, revoked)
+        VALUES (?, ?, ?, ?, 0)
+    """, (user_id, token_hash, datetime.utcnow().isoformat(), expires_at))
+    conn.commit()
+    conn.close()
+
+
+def get_refresh_token(token_hash):
+    """Return the refresh token row by its hash, or None."""
+    conn = get_db()
+    row = conn.execute(
+        "SELECT * FROM refresh_tokens WHERE token_hash = ?", (token_hash,)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def revoke_refresh_token(token_hash):
+    """Mark a single refresh token as revoked (used on sign out or rotation)."""
+    conn = get_db()
+    conn.execute(
+        "UPDATE refresh_tokens SET revoked = 1 WHERE token_hash = ?", (token_hash,)
+    )
+    conn.commit()
+    conn.close()
+
+
+def revoke_all_refresh_tokens(user_id):
+    """Revoke every refresh token for a user — used for 'sign out everywhere'."""
+    conn = get_db()
+    conn.execute(
+        "UPDATE refresh_tokens SET revoked = 1 WHERE user_id = ?", (user_id,)
+    )
+    conn.commit()
+    conn.close()

@@ -10,14 +10,14 @@
 
   <!-- Theme toggle -->
   <button class="theme-toggle" id="themeToggle">
-    <svg class="toggle-icon" id="toggleIcon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
       <circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
     </svg>
     <span id="toggleText">Light mode</span>
   </button>
 
-  <!-- Header -->
-  <div class="header">
+  <!-- Hero header -->
+  <div class="hero-header">
     <div class="logo">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
         <ellipse cx="12" cy="12" rx="10" ry="6"/>
@@ -26,6 +26,22 @@
       LumiVeil
     </div>
     <span class="tagline">Full Analysis Report</span>
+
+    <!-- Content type toggles -->
+    <div class="type-toggles" role="group" aria-label="Content type">
+      <button class="type-toggle is-active" data-type="url">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        News
+      </button>
+      <button class="type-toggle" data-type="image">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+        Image
+      </button>
+      <button class="type-toggle" data-type="social">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 3a10.9 10.9 0 01-3.14 1.53 4.48 4.48 0 00-7.86 3v1A10.66 10.66 0 013 4s-4 9 5 13a11.64 11.64 0 01-7 2c9 5 20 0 20-11.5a4.5 4.5 0 00-.08-.83A7.72 7.72 0 0023 3z"/></svg>
+        Social post
+      </button>
+    </div>
   </div>
 
   <!-- Search bar -->
@@ -34,12 +50,7 @@
       <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
       </svg>
-      <input
-        type="text"
-        id="searchInput"
-        class="search-input"
-        placeholder="Paste a URL, image link, or type a claim to verify…"
-      />
+      <input type="text" id="searchInput" class="search-input" placeholder="Paste a URL, image link, or type a claim to verify…"/>
       <button id="searchBtn" class="search-btn">Analyze</button>
       <button id="clearBtn" class="clear-btn">Clear</button>
     </div>
@@ -53,7 +64,7 @@
 
   <!-- Empty state -->
   <div class="empty-state" id="emptyState">
-    <svg class="empty-icon" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+    <svg class="empty-icon" width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
       <ellipse cx="12" cy="12" rx="10" ry="6"/>
       <circle cx="12" cy="12" r="2.5"/>
     </svg>
@@ -69,100 +80,42 @@
 
   <!-- Results -->
   <div class="results-section" id="resultsSection">
-
     <div class="grid-2">
-      <!-- Trust Score -->
       <div class="section">
-        <h3>
-          <span class="h3-left">Trust Score</span>
-          <svg class="section-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
-        </h3>
-        <div class="section-preview" id="trustPreview">
-          <span class="preview-dot" id="trustDot"></span>
-          <span id="trustPreviewText">Calculating…</span>
-        </div>
+        <h3><span class="h3-left">Trust Score</span><svg class="section-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></h3>
+        <div class="section-preview" id="trustPreview"><span class="preview-dot" id="trustDot"></span><span id="trustPreviewText">Calculating…</span></div>
         <div class="section-content">
           <div class="trust-score-number" id="trustScore">— <span>/ 100</span></div>
-          <div class="trust-bar-bg">
-            <div class="trust-bar-fill" id="trustBarFill"></div>
-          </div>
+          <div class="trust-bar-bg"><div class="trust-bar-fill" id="trustBarFill"></div></div>
           <div class="trust-label" id="trustLabel">Calculating…</div>
         </div>
       </div>
-
-      <!-- Summary -->
       <div class="section">
-        <h3>
-          <span class="h3-left">Summary</span>
-          <svg class="section-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
-        </h3>
-        <div class="section-preview">
-          <span class="preview-dot" style="background:var(--accent)"></span>
-          <span>Hover to read full summary</span>
-        </div>
-        <div class="section-content">
-          <p id="summaryText" class="body-text">Loading summary…</p>
-        </div>
+        <h3><span class="h3-left">Summary</span><svg class="section-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></h3>
+        <div class="section-preview"><span class="preview-dot" style="background:var(--accent)"></span><span>Hover to read full summary</span></div>
+        <div class="section-content"><p id="summaryText" class="body-text">Loading summary…</p></div>
       </div>
     </div>
-
     <div class="grid-2">
-      <!-- Checks Performed -->
       <div class="section">
-        <h3>
-          <span class="h3-left">Checks Performed</span>
-          <svg class="section-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
-        </h3>
-        <div class="section-preview" id="checksPreview">
-          <span class="preview-dot" style="background:var(--accent)"></span>
-          <span id="checksPreviewText">Loading…</span>
-        </div>
-        <div class="section-content">
-          <ul id="checksList" class="checks-list">
-            <li>Loading checks…</li>
-          </ul>
-        </div>
+        <h3><span class="h3-left">Checks Performed</span><svg class="section-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></h3>
+        <div class="section-preview" id="checksPreview"><span class="preview-dot" style="background:var(--accent)"></span><span id="checksPreviewText">Loading…</span></div>
+        <div class="section-content"><ul id="checksList" class="checks-list"><li>Loading checks…</li></ul></div>
       </div>
-
-      <!-- What is Real -->
       <div class="section">
-        <h3>
-          <span class="h3-left">What is Real</span>
-          <svg class="section-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
-        </h3>
-        <div class="section-preview">
-          <span class="preview-dot" style="background:#22c55e"></span>
-          <span>Hover to see verified facts</span>
-        </div>
-        <div class="section-content">
-          <p id="realText" class="body-text">Loading verified facts…</p>
-        </div>
+        <h3><span class="h3-left">What is Real</span><svg class="section-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></h3>
+        <div class="section-preview"><span class="preview-dot" style="background:#22c55e"></span><span>Hover to see verified facts</span></div>
+        <div class="section-content"><p id="realText" class="body-text">Loading verified facts…</p></div>
       </div>
     </div>
-
     <div class="grid-1">
-      <!-- Sources -->
       <div class="section">
-        <h3>
-          <span class="h3-left">Sources Checked</span>
-          <svg class="section-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
-        </h3>
-        <div class="section-preview">
-          <span class="preview-dot" style="background:var(--accent)"></span>
-          <span>Hover to see all sources</span>
-        </div>
-        <div class="section-content">
-          <ul id="sourcesList" class="sources-list">
-            <li>Loading sources…</li>
-          </ul>
-        </div>
+        <h3><span class="h3-left">Sources Checked</span><svg class="section-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></h3>
+        <div class="section-preview"><span class="preview-dot" style="background:var(--accent)"></span><span>Hover to see all sources</span></div>
+        <div class="section-content"><ul id="sourcesList" class="sources-list"><li>Loading sources…</li></ul></div>
       </div>
     </div>
-
-    <div class="footer">
-      <p>Powered by LumiVeil — Lift the veil on fake content</p>
-    </div>
-
+    <div class="footer"><p>Powered by LumiVeil — Lift the veil on fake content</p></div>
   </div>
 
   <script src="sidebar.js"></script>

@@ -29,6 +29,24 @@ themeToggle.addEventListener('click', function() {
 // ---- MAIN ----
 document.addEventListener('DOMContentLoaded', function () {
 
+  // ---- CONTENT TYPE TOGGLES ----
+  document.querySelectorAll('.type-toggle').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('.type-toggle').forEach(function(b) {
+        b.classList.remove('is-active');
+      });
+      this.classList.add('is-active');
+      // Update placeholder based on type
+      var type = this.dataset.type;
+      var placeholders = {
+        'url':    'Paste a news URL to verify…',
+        'image':  'Paste an image URL to check for AI generation or deepfakes…',
+        'social': 'Paste a social media post or claim to verify…'
+      };
+      document.getElementById('searchInput').placeholder = placeholders[type] || 'Paste a URL, image link, or type a claim…';
+    });
+  });
+
   const emptyState = document.getElementById('emptyState');
   const loadingState = document.getElementById('loadingState');
   const resultsSection = document.getElementById('resultsSection');

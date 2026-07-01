@@ -1,30 +1,81 @@
 const API_BASE     = 'https://lumiveil-api-production-8706.up.railway.app';
 const LUMIVEIL_KEY = 'lumiveil-secret-2026';
-const WEBSITE_URL  = 'https://himanshuBhandari2196.github.io/LumiVeil';
+const WEBSITE_URL  = 'https://himanshubhandari2196.github.io/LumiVeil';
 
 // ============================================================
 // SCREEN MANAGEMENT
 // ============================================================
 
 function showScreen(name) {
-  document.getElementById('welcomeScreen').style.display = name === 'welcome' ? 'block' : 'none';
-  document.getElementById('mainScreen').style.display    = name === 'main'    ? 'block' : 'none';
+  ['welcomeScreen', 'waitingScreen', 'mainScreen'].forEach(function(id) {
+    document.getElementById(id).style.display = (id === name + 'Screen') ? 'block' : 'none';
+  });
 }
 
 // ============================================================
 // SESSION STORAGE
 // ============================================================
 
-function saveSession(token, user) {
-  chrome.storage.local.set({ lv_token: token, lv_user: user });
+function saveSession(token, user, refreshToken) {
+  const data = { lv_token: token, lv_user: user };
+  if (refreshToken) data.lv_refresh_token = refreshToken;
+  chrome.storage.local.set(data);
 }
 
 function clearSession() {
-  chrome.storage.local.remove(['lv_token', 'lv_user', 'lastResult']);
+  chrome.storage.local.remove(['lv_token', 'lv_user', 'lv_refresh_token', 'lastResult']);
 }
 
 function getSession(cb) {
-  chrome.storage.local.get(['lv_token', 'lv_user'], cb);
+  chrome.storage.local.get(['lv_token', 'lv_user', 'lv_refresh_token'], cb);
+}
+
+// ============================================================
+// SILENT TOKEN REFRESH
+// ============================================================
+
+function silentRefresh(callback) {
+  getSession(function (session) {
+    if (!session.lv_refresh_token) { callback(null); return; }
+    fetch(`${API_BASE}/api/v1/auth/refresh`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', 'X-API-Key': LUMIVEIL_KEY },
+      body:    JSON.stringify({ refresh_token: session.lv_refresh_token })
+    })
+    .then(r => r.json().then(d => ({ status: r.status, data: d })))
+    .then(({ status, data }) => {
+      if (status === 200 && data.token) {
+        chrome.storage.local.set({ lv_token: data.token });
+        callback(data.token);
+      } else {
+        clearSession();
+        callback(null);
+      }
+    })
+    .catch(() => callback(null));
+  });
+}
+
+function authedFetch(url, options, onResult) {
+  fetch(url, options)
+    .then(r => r.json().then(d => ({ status: r.status, data: d })))
+    .then(({ status, data }) => {
+      if (status === 401) {
+        silentRefresh(function (newToken) {
+          if (!newToken) { onResult({ status: 401, data }); return; }
+          const retryOpts = Object.assign({}, options, {
+            headers: Object.assign({}, options.headers, { 'Authorization': `Bearer ${newToken}` })
+          });
+          fetch(url, retryOpts)
+            .then(r2 => r2.json().then(d2 => ({ status: r2.status, data: d2 })))
+            .then(onResult)
+            .catch(() => onResult({ status: 0, data: { error: 'Network error' } }));
+        });
+      } else {
+        onResult({ status, data });
+      }
+    })
+    .catch(() => onResult({ status: 0, data: { error: 'Network error' } }));
 }
 
 // ============================================================
@@ -39,34 +90,68 @@ function updateUsageBar(used, limit) {
   const pct   = Math.min((used / limit) * 100, 100);
   const fill  = document.getElementById('usageBarFill');
   const label = document.getElementById('usageLabel');
-
   fill.style.width = pct + '%';
   fill.className   = 'usage-bar-fill';
   if (pct >= 90)      fill.classList.add('danger');
   else if (pct >= 70) fill.classList.add('warn');
-
   label.textContent = `${used} / ${limit} analyses today  (${Math.max(0, limit - used)} remaining)`;
 }
 
 function fetchAndUpdateUsage(token) {
-  fetch(`${API_BASE}/api/v1/user/status`, {
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'X-API-Key': LUMIVEIL_KEY
-    }
-  })
-  .then(r => r.json())
-  .then(data => {
+  authedFetch(`${API_BASE}/api/v1/user/status`, {
+    headers: { 'Authorization': `Bearer ${token}`, 'X-API-Key': LUMIVEIL_KEY }
+  }, function ({ status, data }) {
+    if (status === 401) { clearSession(); showScreen('welcome'); return; }
     if (data.usage) {
-      updateUsageBar(data.usage.today, data.usage.limit);
+      const used  = typeof data.usage.today === 'number' ? data.usage.today : 0;
+      const limit = typeof data.usage.limit === 'number' ? data.usage.limit : 30;
+      setTimeout(function() { updateUsageBar(used, limit); }, 100);
     }
     if (data.user) {
       const badge = document.getElementById('tierBadge');
-      badge.textContent = data.user.tier;
-      badge.className   = 'tier-badge ' + data.user.tier;
+      if (badge) { badge.textContent = data.user.tier || 'free'; badge.className = 'tier-badge ' + (data.user.tier || 'free'); }
+      chrome.storage.local.set({ lv_user: data.user });
     }
-  })
-  .catch(() => {});
+  });
+}
+
+// ============================================================
+// LISTEN FOR LOGIN MESSAGE FROM WEBSITE
+// The website sends tokens here directly after sign-in —
+// no copy-paste needed. background.js receives the external
+// message and stores it; we poll storage here to detect it.
+// ============================================================
+
+let loginPollInterval = null;
+
+function startLoginPoll() {
+  // Poll chrome.storage every second to detect when background.js
+  // has received and stored the login tokens from the website
+  loginPollInterval = setInterval(function() {
+    getSession(function(data) {
+      if (data.lv_token && data.lv_user) {
+        stopLoginPoll();
+        showMainScreen(data.lv_token, data.lv_user);
+      }
+    });
+  }, 1000);
+}
+
+function stopLoginPoll() {
+  if (loginPollInterval) {
+    clearInterval(loginPollInterval);
+    loginPollInterval = null;
+  }
+}
+
+function showMainScreen(token, user) {
+  showScreen('main');
+  const badge = document.getElementById('tierBadge');
+  if (badge) {
+    badge.textContent = user.tier || 'free';
+    badge.className   = 'tier-badge ' + (user.tier || 'free');
+  }
+  fetchAndUpdateUsage(token);
 }
 
 // ============================================================
@@ -77,83 +162,31 @@ document.addEventListener('DOMContentLoaded', function () {
 
   // Check for existing session on open
   getSession(function (data) {
-    if (data.lv_token && data.lv_user) {
-      // Logged in user
-      showScreen('main');
-      const badge = document.getElementById('tierBadge');
-      badge.textContent = data.lv_user.tier || 'free';
-      badge.className   = 'tier-badge ' + (data.lv_user.tier || 'free');
-      fetchAndUpdateUsage(data.lv_token);
+    if (data.lv_token && data.lv_user && !data.lv_user.guest) {
+      showMainScreen(data.lv_token, data.lv_user);
     } else if (data.lv_user && data.lv_user.guest) {
-      // Guest
       showScreen('main');
       const badge = document.getElementById('tierBadge');
-      badge.textContent = 'guest';
-      badge.className   = 'tier-badge guest';
+      if (badge) { badge.textContent = 'guest'; badge.className = 'tier-badge guest'; }
       document.getElementById('usageWrap').style.display = 'none';
     } else {
       showScreen('welcome');
     }
   });
 
-  // ── Create account → open website in new tab ──
-  document.getElementById('createAccountBtn').addEventListener('click', function () {
-    chrome.tabs.create({ url: WEBSITE_URL + '#pricing' });
+  // ── Sign in button → open website in new tab + show waiting screen ──
+  document.getElementById('signInBtn').addEventListener('click', function () {
+    // Include extension ID in URL so website knows where to send tokens back
+    const extId = chrome.runtime.id;
+    chrome.tabs.create({ url: `${WEBSITE_URL}?lumiveil_signin=1&ext_id=${extId}` });
+    showScreen('waiting');
+    startLoginPoll();
   });
 
-  // ── Token paste → validate with backend ──
-  document.getElementById('tokenSubmitBtn').addEventListener('click', function () {
-    const token = document.getElementById('tokenInput').value.trim();
-    const errorEl = document.getElementById('tokenError');
-    errorEl.style.display = 'none';
-
-    if (!token) {
-      errorEl.textContent = 'Please paste your token first.';
-      errorEl.style.display = 'block';
-      return;
-    }
-
-    const btn = this;
-    btn.textContent = 'Checking…';
-    btn.disabled    = true;
-
-    // Validate token by hitting /user/status
-    fetch(`${API_BASE}/api/v1/user/status`, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'X-API-Key': LUMIVEIL_KEY
-      }
-    })
-    .then(r => r.json().then(d => ({ status: r.status, data: d })))
-    .then(({ status, data }) => {
-      btn.textContent = 'Connect';
-      btn.disabled    = false;
-
-      if (status === 200 && data.user) {
-        saveSession(token, data.user);
-        showScreen('main');
-        const badge = document.getElementById('tierBadge');
-        badge.textContent = data.user.tier;
-        badge.className   = 'tier-badge ' + data.user.tier;
-        if (data.usage) {
-          updateUsageBar(data.usage.today, data.usage.limit);
-        }
-      } else {
-        errorEl.textContent = 'Invalid token. Copy it from your profile page on the LumiVeil website.';
-        errorEl.style.display = 'block';
-      }
-    })
-    .catch(() => {
-      btn.textContent = 'Connect';
-      btn.disabled    = false;
-      errorEl.textContent = 'Could not connect to backend. Make sure Flask is running.';
-      errorEl.style.display = 'block';
-    });
-  });
-
-  // Allow pressing Enter in the token field
-  document.getElementById('tokenInput').addEventListener('keydown', function (e) {
-    if (e.key === 'Enter') document.getElementById('tokenSubmitBtn').click();
+  // ── Cancel waiting ──
+  document.getElementById('cancelWaitBtn').addEventListener('click', function () {
+    stopLoginPoll();
+    showScreen('welcome');
   });
 
   // ── Guest mode ──
@@ -161,17 +194,25 @@ document.addEventListener('DOMContentLoaded', function () {
     clearSession();
     chrome.storage.local.set({ lv_user: { guest: true } });
     showScreen('main');
-    document.getElementById('tierBadge').textContent = 'guest';
-    document.getElementById('tierBadge').className   = 'tier-badge guest';
+    const badge = document.getElementById('tierBadge');
+    if (badge) { badge.textContent = 'guest'; badge.className = 'tier-badge guest'; }
     document.getElementById('usageWrap').style.display = 'none';
   });
 
   // ── Sign out ──
   document.getElementById('signOutBtn').addEventListener('click', function () {
-    clearSession();
-    document.getElementById('tokenInput').value = '';
-    document.getElementById('resultText').textContent = 'Results will appear here…';
-    showScreen('welcome');
+    getSession(function (session) {
+      if (session.lv_refresh_token) {
+        fetch(`${API_BASE}/api/v1/auth/logout`, {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json', 'X-API-Key': LUMIVEIL_KEY },
+          body:    JSON.stringify({ refresh_token: session.lv_refresh_token })
+        }).catch(() => {});
+      }
+      clearSession();
+      document.getElementById('resultText').textContent = 'Results will appear here…';
+      showScreen('welcome');
+    });
   });
 
   // ── Analyze ──
@@ -192,66 +233,36 @@ document.addEventListener('DOMContentLoaded', function () {
     analyzeBtn.textContent = 'Analyzing…';
 
     getSession(function (sessionData) {
-      const headers = {
-        'Content-Type': 'application/json',
-        'X-API-Key':    LUMIVEIL_KEY
-      };
-      if (sessionData.lv_token) {
-        headers['Authorization'] = `Bearer ${sessionData.lv_token}`;
-      }
+      const headers = { 'Content-Type': 'application/json', 'X-API-Key': LUMIVEIL_KEY };
+      if (sessionData.lv_token) headers['Authorization'] = `Bearer ${sessionData.lv_token}`;
 
-      fetch(`${API_BASE}/api/v1/analyze`, {
-        method:  'POST',
-        headers: headers,
-        body:    JSON.stringify({ input })
-      })
-      .then(r => r.json().then(d => ({ status: r.status, data: d })))
-      .then(({ status, data }) => {
-        analyzeBtn.disabled  = false;
+      authedFetch(`${API_BASE}/api/v1/analyze`, {
+        method: 'POST', headers, body: JSON.stringify({ input })
+      }, function ({ status, data }) {
+        analyzeBtn.disabled    = false;
         analyzeBtn.textContent = 'Analyze';
 
-        if (status === 429) {
-          resultText.textContent = data.reason || 'Daily limit reached. Upgrade to Pro for more.';
-          resultText.style.color = '#F59E0B';
-          return;
-        }
-        if (status === 403) {
-          resultText.textContent = 'Image analysis is a Pro feature. Upgrade at lumiveil.com';
-          resultText.style.color = '#F59E0B';
-          return;
-        }
-        if (status !== 200) {
-          resultText.textContent = data.error || 'Something went wrong.';
-          resultText.style.color = '#EF4444';
-          return;
-        }
+        if (status === 429) { resultText.textContent = data.reason || 'Daily limit reached.'; resultText.style.color = '#F59E0B'; return; }
+        if (status === 403) { resultText.textContent = 'Image analysis is a Pro feature.'; resultText.style.color = '#F59E0B'; return; }
+        if (status === 401) { resultText.textContent = 'Session expired. Please sign in again.'; resultText.style.color = '#F59E0B'; clearSession(); return; }
+        if (status !== 200) { resultText.textContent = data.error || 'Something went wrong.'; resultText.style.color = '#EF4444'; return; }
 
         resultText.textContent = data.summary;
         resultText.style.color = '#FFFFFF';
         chrome.storage.local.set({ lastResult: data });
 
-        // Update usage bar
         if (sessionData.lv_token && data.remaining_today !== undefined) {
           const limits = { free: 30, pro: 300, max: 999999 };
           const limit  = limits[data.tier] || 30;
           updateUsageBar(limit - data.remaining_today, limit);
         }
-      })
-      .catch(() => {
-        analyzeBtn.disabled    = false;
-        analyzeBtn.textContent = 'Analyze';
-        resultText.textContent = 'Could not connect to LumiVeil backend. Make sure Flask is running.';
-        resultText.style.color = '#EF4444';
       });
     });
   });
 
   // Enter key in textarea
   document.getElementById('userInput').addEventListener('keydown', function (e) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      document.getElementById('analyzeBtn').click();
-    }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); document.getElementById('analyzeBtn').click(); }
   });
 
   // Full report button

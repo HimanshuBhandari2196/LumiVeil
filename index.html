@@ -1161,13 +1161,13 @@
         <div class="modal__success" id="modalLoginSuccess" style="display:block">
           ✅ Signed in successfully!
         </div>
-        <div class="modal__token-label">Your extension token</div>
+        <div class="modal__token-label">Your connection code</div>
         <div class="modal__token-box">
           <span class="modal__token-value" id="modalTokenValue"></span>
           <button class="modal__copy-btn" id="modalCopyBtn">Copy</button>
         </div>
         <p class="modal__token-hint">
-          Copy this token and paste it into the LumiVeil extension popup to connect your account. Keep it private — treat it like a password.
+          Copy this code and paste it into the LumiVeil extension popup to connect your account. You'll stay signed in automatically — no need to do this again unless you sign out. Keep it private, treat it like a password.
         </p>
       </div>
 
@@ -1175,6 +1175,33 @@
   </div>
 
   <script>
+    // LumiVeil Chrome Extension ID
+    // Get this from chrome://extensions after loading the extension
+    var EXTENSION_ID = chrome.runtime && chrome.runtime.id ? chrome.runtime.id : null;
+
+    // Send tokens directly to the extension after successful login
+    function sendTokensToExtension(token, refreshToken, user) {
+      if (typeof chrome === 'undefined' || !chrome.runtime) return;
+      // Get the extension ID from the URL query param if available
+      var urlParams = new URLSearchParams(window.location.search);
+      var extId = urlParams.get('ext_id');
+      if (!extId) return;
+
+      chrome.runtime.sendMessage(extId, {
+        action:        'lumiveil_login',
+        token:         token,
+        refresh_token: refreshToken,
+        user:          user
+      }, function(response) {
+        if (response && response.success) {
+          // Tokens delivered — close this tab after a short delay
+          setTimeout(function() { window.close(); }, 1500);
+          // Show success message in modal
+          document.getElementById('modalLoginSuccess').textContent = '✅ Connected to extension! This tab will close.';
+        }
+      });
+    }
+
     // Keep Railway backend alive — ping every 10 minutes
     setInterval(function() {
       fetch('https://lumiveil-api-production-8706.up.railway.app/ping')
@@ -1244,10 +1271,11 @@
       clearModalMessages();
     }
 
-    function updateNavLoggedIn(user, token) {
+    function updateNavLoggedIn(user, token, refreshToken) {
       storedToken = token;
       localStorage.setItem('lv_token', token);
       localStorage.setItem('lv_user',  JSON.stringify(user));
+      if (refreshToken) localStorage.setItem('lv_refresh_token', refreshToken);
 
       document.getElementById('navLoggedOut').style.display = 'none';
       document.getElementById('navLoggedIn').classList.add('visible');
@@ -1258,14 +1286,23 @@
       storedToken = null;
       localStorage.removeItem('lv_token');
       localStorage.removeItem('lv_user');
+      localStorage.removeItem('lv_refresh_token');
       document.getElementById('navLoggedOut').style.display = 'flex';
       document.getElementById('navLoggedIn').classList.remove('visible');
     }
 
-    function showTokenSection(token) {
+    // Combine access + refresh token into one pasteable code.
+    // Uses "::" as separator since JWT access tokens already contain dots.
+    // The extension splits this back apart on paste — keeps the
+    // "paste your token" UX as a single copy/paste step.
+    function buildConnectionCode(accessToken, refreshToken) {
+      return accessToken + '::' + refreshToken;
+    }
+
+    function showTokenSection(token, refreshToken) {
       document.getElementById('modalAuthSection').style.display  = 'none';
       document.getElementById('modalTokenSection').classList.add('visible');
-      document.getElementById('modalTokenValue').textContent = token;
+      document.getElementById('modalTokenValue').textContent = buildConnectionCode(token, refreshToken);
     }
 
     // Open modal from nav
@@ -1274,9 +1311,10 @@
     // Open token view from "My token" button
     document.getElementById('navTokenBtn').addEventListener('click', function() {
       if (storedToken) {
+        var storedRefresh = localStorage.getItem('lv_refresh_token') || '';
         document.getElementById('modalAuthSection').style.display = 'none';
         document.getElementById('modalTokenSection').classList.add('visible');
-        document.getElementById('modalTokenValue').textContent = storedToken;
+        document.getElementById('modalTokenValue').textContent = buildConnectionCode(storedToken, storedRefresh);
         document.getElementById('modalLoginSuccess').style.display = 'none';
         openModal();
       }
@@ -1284,6 +1322,15 @@
 
     // Sign out
     document.getElementById('navSignOutBtn').addEventListener('click', function() {
+      var storedRefresh = localStorage.getItem('lv_refresh_token');
+      if (storedRefresh) {
+        // Revoke on the backend so this refresh token can't be reused
+        fetch(API_BASE + '/api/v1/auth/logout', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json', 'X-API-Key': LUMIVEIL_KEY },
+          body:    JSON.stringify({ refresh_token: storedRefresh })
+        }).catch(function() {});
+      }
       updateNavLoggedOut();
       // Reset modal back to auth form
       document.getElementById('modalAuthSection').style.display = 'block';
@@ -1349,8 +1396,10 @@
         modalAuthBtn.textContent = currentTab === 'login' ? 'Sign in' : 'Create account';
 
         if (res.status === 200 || res.status === 201) {
-          updateNavLoggedIn(res.data.user, res.data.token);
-          showTokenSection(res.data.token);
+          updateNavLoggedIn(res.data.user, res.data.token, res.data.refresh_token);
+          showTokenSection(res.data.token, res.data.refresh_token);
+          // Send tokens directly to extension if this was opened from it
+          sendTokensToExtension(res.data.token, res.data.refresh_token, res.data.user);
         } else {
           showModalError(res.data.error || 'Something went wrong. Please try again.');
         }
@@ -1369,14 +1418,18 @@
       });
     });
 
-    // Restore session on page load
+    // Restore session on page load + auto-open modal if opened from extension
     (function() {
-      var token = localStorage.getItem('lv_token');
-      var user  = localStorage.getItem('lv_user');
+      var token   = localStorage.getItem('lv_token');
+      var user    = localStorage.getItem('lv_user');
       if (token && user) {
-        try {
-          updateNavLoggedIn(JSON.parse(user), token);
-        } catch(e) {}
+        try { updateNavLoggedIn(JSON.parse(user), token, localStorage.getItem('lv_refresh_token')); } catch(e) {}
+      }
+
+      // If opened from the extension popup, auto-open the sign-in modal
+      var urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.get('lumiveil_signin') === '1') {
+        openModal();
       }
     })();
 
