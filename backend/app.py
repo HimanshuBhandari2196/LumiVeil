@@ -35,6 +35,7 @@ import secrets
 import hashlib
 import io
 import re
+import json
 from PIL import Image
 import os
 from dotenv import load_dotenv
