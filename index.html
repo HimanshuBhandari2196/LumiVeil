@@ -1175,31 +1175,26 @@
   </div>
 
   <script>
-    // LumiVeil Chrome Extension ID
-    // Get this from chrome://extensions after loading the extension
-    var EXTENSION_ID = chrome.runtime && chrome.runtime.id ? chrome.runtime.id : null;
+    // Listen for acknowledgement from extension that tokens were received
+    window.addEventListener('message', function(event) {
+      if (event.source !== window) return;
+      if (!event.data || event.data.type !== 'LUMIVEIL_LOGIN_ACK') return;
+      // Extension got the tokens — update UI and close tab
+      document.getElementById('modalLoginSuccess').textContent = '✅ Connected! You can close this tab.';
+      setTimeout(function() { window.close(); }, 2000);
+    });
 
-    // Send tokens directly to the extension after successful login
+    // Send tokens to extension after successful login.
+    // Uses window.postMessage since chrome.runtime is not available
+    // on regular webpages. The extension's content script listens
+    // for this message and relays it to background.js.
     function sendTokensToExtension(token, refreshToken, user) {
-      if (typeof chrome === 'undefined' || !chrome.runtime) return;
-      // Get the extension ID from the URL query param if available
-      var urlParams = new URLSearchParams(window.location.search);
-      var extId = urlParams.get('ext_id');
-      if (!extId) return;
-
-      chrome.runtime.sendMessage(extId, {
-        action:        'lumiveil_login',
+      window.postMessage({
+        type:          'LUMIVEIL_LOGIN',
         token:         token,
         refresh_token: refreshToken,
         user:          user
-      }, function(response) {
-        if (response && response.success) {
-          // Tokens delivered — close this tab after a short delay
-          setTimeout(function() { window.close(); }, 1500);
-          // Show success message in modal
-          document.getElementById('modalLoginSuccess').textContent = '✅ Connected to extension! This tab will close.';
-        }
-      });
+      }, '*');
     }
 
     // Keep Railway backend alive — ping every 10 minutes
@@ -1397,9 +1392,20 @@
 
         if (res.status === 200 || res.status === 201) {
           updateNavLoggedIn(res.data.user, res.data.token, res.data.refresh_token);
-          showTokenSection(res.data.token, res.data.refresh_token);
-          // Send tokens directly to extension if this was opened from it
-          sendTokensToExtension(res.data.token, res.data.refresh_token, res.data.user);
+          // Check if opened from extension — if so, just show success, no token needed
+          var urlParams = new URLSearchParams(window.location.search);
+          var fromExtension = urlParams.get('lumiveil_signin') === '1';
+          if (fromExtension) {
+            document.getElementById('modalAuthSection').style.display = 'none';
+            document.getElementById('modalTokenSection').classList.add('visible');
+            document.getElementById('modalLoginSuccess').textContent = '✅ Signing you in…';
+            document.getElementById('modalTokenValue').parentElement.style.display = 'none';
+            document.querySelector('.modal__token-hint').style.display = 'none';
+            document.querySelector('.modal__token-label').style.display = 'none';
+            sendTokensToExtension(res.data.token, res.data.refresh_token, res.data.user);
+          } else {
+            showTokenSection(res.data.token, res.data.refresh_token);
+          }
         } else {
           showModalError(res.data.error || 'Something went wrong. Please try again.');
         }

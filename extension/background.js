@@ -46,6 +46,18 @@ chrome.runtime.onMessageExternal.addListener(function (request, sender, sendResp
 // ============================================================
 chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
 
+  // Store login tokens relayed from the website via content.js
+  if (request.action === 'store_login') {
+    const { token, refresh_token, user } = request;
+    if (!token || !user) { sendResponse({ success: false }); return true; }
+    const data = { lv_token: token, lv_user: user };
+    if (refresh_token) data.lv_refresh_token = refresh_token;
+    chrome.storage.local.set(data, function () {
+      sendResponse({ success: true });
+    });
+    return true;
+  }
+
   // Content script asking background to analyze the current page
   if (request.action === 'analyze') {
     // Get stored token to send with request if available

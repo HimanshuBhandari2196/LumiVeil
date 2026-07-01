@@ -6,6 +6,33 @@ const SCORE_THRESHOLD = 40;
 const ANALYSIS_DELAY  = 2000;
 
 // ============================================================
+// WEBSITE → EXTENSION LOGIN BRIDGE
+// When the user signs in on the LumiVeil website, the page
+// fires a postMessage with the tokens. This content script
+// listens for it and relays it to background.js, which stores
+// the tokens so the popup can detect the login automatically.
+// ============================================================
+window.addEventListener('message', function (event) {
+  if (event.source !== window) return;
+  if (!event.data || event.data.type !== 'LUMIVEIL_LOGIN') return;
+
+  const { token, refresh_token, user } = event.data;
+  if (!token || !user) return;
+
+  chrome.runtime.sendMessage({
+    action:        'store_login',
+    token:         token,
+    refresh_token: refresh_token,
+    user:          user
+  }, function (response) {
+    if (response && response.success) {
+      // Tell the page the extension received the tokens
+      window.postMessage({ type: 'LUMIVEIL_LOGIN_ACK' }, '*');
+    }
+  });
+});
+
+// ============================================================
 // INJECT BANNER STYLES
 // ============================================================
 function injectStyles() {
