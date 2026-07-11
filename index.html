@@ -1224,6 +1224,24 @@
     </div>
   </div>
 
+  <!-- DELETE ACCOUNT MODAL -->
+  <div id="deleteModal" style="display:none;position:fixed;inset:0;z-index:1001;background:rgba(0,0,0,0.75);backdrop-filter:blur(6px);align-items:center;justify-content:center;padding:20px;">
+    <div style="background:#17171E;border:1px solid rgba(239,68,68,0.3);border-radius:20px;padding:36px 32px;width:100%;max-width:400px;box-shadow:0 24px 64px rgba(0,0,0,0.6);">
+      <h2 style="font-size:20px;font-weight:600;color:#fff;margin-bottom:10px;">Delete your account?</h2>
+      <p style="font-size:14px;color:#9490A8;line-height:1.6;margin-bottom:24px;">This will permanently delete your account and all associated data. This action cannot be undone.</p>
+      <div style="margin-bottom:16px;">
+        <label style="font-size:12px;font-weight:600;color:#9490A8;letter-spacing:0.04em;display:block;margin-bottom:6px;">Confirm your password</label>
+        <input type="password" id="deletePasswordInput" placeholder="••••••••"
+          style="width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:11px 14px;font-size:14px;font-family:inherit;color:#fff;outline:none;" />
+      </div>
+      <div id="deleteError" style="display:none;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.25);border-radius:8px;padding:10px 14px;font-size:13px;color:#EF4444;margin-bottom:16px;"></div>
+      <div style="display:flex;gap:10px;">
+        <button id="deleteCancelBtn" style="flex:1;padding:12px;border-radius:10px;background:transparent;border:1px solid rgba(255,255,255,0.1);color:#9490A8;font-size:14px;font-weight:600;font-family:inherit;cursor:pointer;">Cancel</button>
+        <button id="deleteConfirmBtn" style="flex:1;padding:12px;border-radius:10px;background:#EF4444;border:none;color:#fff;font-size:14px;font-weight:600;font-family:inherit;cursor:pointer;">Delete account</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     // Listen for acknowledgement from extension that tokens were received
     window.addEventListener('message', function(event) {
@@ -1245,6 +1263,22 @@
         refresh_token: refreshToken,
         user:          user
       }, '*');
+    }
+
+    // Puts the modal into "connecting to extension" state — success
+    // message only, the connection code and its hint/label stay hidden
+    // the whole time. Used both for a fresh sign-in from the extension
+    // and for an already-authenticated user reconnecting silently, so
+    // the raw code is never rendered to the page in either case.
+    function showConnectingState(message) {
+      document.getElementById('modalAuthSection').style.display = 'none';
+      document.getElementById('modalTokenSection').classList.add('visible');
+      document.getElementById('modalLoginSuccess').style.display = 'block';
+      document.getElementById('modalLoginSuccess').textContent   = message;
+      document.getElementById('modalTokenValue').parentElement.style.display = 'none';
+      document.querySelector('.modal__token-hint').style.display  = 'none';
+      document.querySelector('.modal__token-label').style.display = 'none';
+      document.getElementById('verifyEmailReminder').style.display = 'none';
     }
 
     // Keep Railway backend alive — ping every 10 minutes
@@ -1590,12 +1624,7 @@
           var urlParams = new URLSearchParams(window.location.search);
           var fromExtension = urlParams.get('lumiveil_signin') === '1';
           if (fromExtension) {
-            document.getElementById('modalAuthSection').style.display = 'none';
-            document.getElementById('modalTokenSection').classList.add('visible');
-            document.getElementById('modalLoginSuccess').textContent = '✅ Signing you in…';
-            document.getElementById('modalTokenValue').parentElement.style.display = 'none';
-            document.querySelector('.modal__token-hint').style.display = 'none';
-            document.querySelector('.modal__token-label').style.display = 'none';
+            showConnectingState('✅ Signing you in…');
             sendTokensToExtension(res.data.token, res.data.refresh_token, res.data.user);
           } else {
             showTokenSection(res.data.token, res.data.refresh_token);
@@ -1674,40 +1703,40 @@
       });
     });
 
-    // Restore session on page load + auto-open modal if opened from extension
+    // Restore session on page load + handle arrival from the extension
     (function() {
       var token   = localStorage.getItem('lv_token');
       var user    = localStorage.getItem('lv_user');
+      var urlParams      = new URLSearchParams(window.location.search);
+      var fromExtension  = urlParams.get('lumiveil_signin') === '1';
+      var hasSession     = false;
+
       if (token && user) {
-        try { updateNavLoggedIn(JSON.parse(user), token, localStorage.getItem('lv_refresh_token')); } catch(e) {}
+        try {
+          updateNavLoggedIn(JSON.parse(user), token, localStorage.getItem('lv_refresh_token'));
+          hasSession = true;
+        } catch(e) {}
       }
 
-      // If opened from the extension popup, auto-open the sign-in modal
-      var urlParams = new URLSearchParams(window.location.search);
-      if (urlParams.get('lumiveil_signin') === '1') {
+      if (!fromExtension) return;
+
+      if (hasSession) {
+        // Already signed in on the website — connect the extension
+        // immediately instead of asking to log in again. No login form,
+        // no connection code, ever shown on this path.
+        openModal();
+        showConnectingState('✅ Connecting your account…');
+        try {
+          sendTokensToExtension(token, localStorage.getItem('lv_refresh_token'), JSON.parse(user));
+        } catch (e) {}
+      } else {
+        // Not signed in yet — show the normal sign-in form
         openModal();
       }
     })();
 
   </script>
 
-  <!-- DELETE ACCOUNT MODAL -->
-  <div id="deleteModal" style="display:none;position:fixed;inset:0;z-index:1001;background:rgba(0,0,0,0.75);backdrop-filter:blur(6px);display:none;align-items:center;justify-content:center;padding:20px;">
-    <div style="background:#17171E;border:1px solid rgba(239,68,68,0.3);border-radius:20px;padding:36px 32px;width:100%;max-width:400px;box-shadow:0 24px 64px rgba(0,0,0,0.6);">
-      <h2 style="font-size:20px;font-weight:600;color:#fff;margin-bottom:10px;">Delete your account?</h2>
-      <p style="font-size:14px;color:#9490A8;line-height:1.6;margin-bottom:24px;">This will permanently delete your account and all associated data. This action cannot be undone.</p>
-      <div style="margin-bottom:16px;">
-        <label style="font-size:12px;font-weight:600;color:#9490A8;letter-spacing:0.04em;display:block;margin-bottom:6px;">Confirm your password</label>
-        <input type="password" id="deletePasswordInput" placeholder="••••••••"
-          style="width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:11px 14px;font-size:14px;font-family:inherit;color:#fff;outline:none;" />
-      </div>
-      <div id="deleteError" style="display:none;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.25);border-radius:8px;padding:10px 14px;font-size:13px;color:#EF4444;margin-bottom:16px;"></div>
-      <div style="display:flex;gap:10px;">
-        <button id="deleteCancelBtn" style="flex:1;padding:12px;border-radius:10px;background:transparent;border:1px solid rgba(255,255,255,0.1);color:#9490A8;font-size:14px;font-weight:600;font-family:inherit;cursor:pointer;">Cancel</button>
-        <button id="deleteConfirmBtn" style="flex:1;padding:12px;border-radius:10px;background:#EF4444;border:none;color:#fff;font-size:14px;font-weight:600;font-family:inherit;cursor:pointer;">Delete account</button>
-      </div>
-    </div>
-  </div>
   <script>
     function googleTranslateElementInit() {
       new google.translate.TranslateElement({
