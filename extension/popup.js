@@ -176,9 +176,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
   // ── Sign in button → open website in new tab + show waiting screen ──
   document.getElementById('signInBtn').addEventListener('click', function () {
-    // Include extension ID in URL so website knows where to send tokens back
-    const extId = chrome.runtime.id;
-    chrome.tabs.create({ url: `${WEBSITE_URL}?lumiveil_signin=1&ext_id=${extId}` });
+    chrome.tabs.create({ url: `${WEBSITE_URL}?lumiveil_signin=1` });
     showScreen('waiting');
     startLoginPoll();
   });

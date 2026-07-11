@@ -4,43 +4,6 @@ const BACKEND_URL  = 'https://lumiveil-api-production-8706.up.railway.app/api/v1
 const LUMIVEIL_KEY = 'lumiveil-secret-2026';
 
 // ============================================================
-// EXTERNAL MESSAGE LISTENER
-// Receives login tokens directly from the LumiVeil website
-// after the user signs in — no copy-paste required.
-// The website calls chrome.runtime.sendMessage(EXTENSION_ID, ...)
-// which routes here via the externally_connectable manifest entry.
-// ============================================================
-chrome.runtime.onMessageExternal.addListener(function (request, sender, sendResponse) {
-  if (request.action === 'lumiveil_login') {
-    // Validate the message came from our website
-    const allowedOrigins = [
-      'https://himanshubhandari2196.github.io',
-      'http://localhost:5000',
-      'http://127.0.0.1:5000'
-    ];
-    if (!allowedOrigins.some(o => sender.origin && sender.origin.startsWith(o))) {
-      sendResponse({ success: false, error: 'Unauthorized origin' });
-      return true;
-    }
-
-    const { token, refresh_token, user } = request;
-    if (!token || !user) {
-      sendResponse({ success: false, error: 'Missing token or user' });
-      return true;
-    }
-
-    // Store both tokens and user info — popup will read these on next open
-    const data = { lv_token: token, lv_user: user };
-    if (refresh_token) data.lv_refresh_token = refresh_token;
-
-    chrome.storage.local.set(data, function () {
-      sendResponse({ success: true });
-    });
-    return true; // Keep channel open for async response
-  }
-});
-
-// ============================================================
 // INTERNAL MESSAGE LISTENER
 // Handles messages from content.js and popup.js
 // ============================================================
