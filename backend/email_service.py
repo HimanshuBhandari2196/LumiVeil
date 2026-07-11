@@ -13,7 +13,10 @@ import os
 import requests
 
 RESEND_API_KEY  = os.environ.get('RESEND_API_KEY', '')
-FROM_EMAIL      = 'LumiVeil <onboarding@resend.dev>'
+# Defaults to Resend's shared test address. Once you've bought a domain and
+# verified it in Resend (see backend/README or ask for the walkthrough),
+# just add RESEND_FROM_EMAIL as a Railway variable — no code change needed.
+FROM_EMAIL      = os.environ.get('RESEND_FROM_EMAIL', 'LumiVeil <onboarding@resend.dev>')
 WEBSITE_URL     = 'https://himanshubhandari2196.github.io/LumiVeil'
 BACKEND_URL     = 'https://lumiveil-api-production-8706.up.railway.app'
 
