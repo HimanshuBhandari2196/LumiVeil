@@ -29,6 +29,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from werkzeug.middleware.proxy_fix import ProxyFix
 import requests as http_requests
 from bs4 import BeautifulSoup
 import secrets
@@ -39,13 +40,19 @@ import json
 from PIL import Image
 import os
 from dotenv import load_dotenv
-from database import init_db, get_user_by_email, create_user, check_usage_allowed, increment_usage, TIER_LIMITS, get_usage_today, update_last_login, create_email_verification_token, verify_email_token, create_password_reset_token, verify_password_reset_token, consume_password_reset_token
+from database import init_db, get_user_by_email, create_user, check_usage_allowed, increment_usage, TIER_LIMITS, get_usage_today, update_last_login, create_email_verification_token, verify_email_token, create_password_reset_token, verify_password_reset_token, consume_password_reset_token, check_guest_usage_allowed, increment_guest_usage
 from auth import hash_password, verify_password, generate_token, get_user_from_token, issue_token_pair, refresh_access_token, revoke_refresh_token_plaintext
 from email_service import send_verification_email, send_password_reset_email
 
 load_dotenv()
 
 app = Flask(__name__)
+
+# Railway (like most PaaS) sits behind a reverse proxy, so request.remote_addr
+# would otherwise return the proxy's internal address for every request —
+# silently breaking all per-IP rate limiting and guest usage tracking below.
+# x_for=1 trusts a single hop of X-Forwarded-For, which matches Railway's setup.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
 # Initialise database on startup
 init_db()
@@ -1263,8 +1270,9 @@ def analyze():
 
     Body: { "input": "<url | image-url | plain text claim>" }
 
-    If no valid JWT is supplied, the request is treated as a free-tier
-    anonymous request (no usage tracking, image analysis blocked).
+    If no valid JWT is supplied, the request is treated as a guest — tracked
+    by hashed IP with the same daily cap as the free tier, image analysis
+    still blocked.
     """
 
     # -- Extension auth --
@@ -1276,6 +1284,7 @@ def analyze():
     tier = user['tier'] if user else 'free'
 
     # -- Usage check --
+    guest_ip_hash = None
     if user:
         allowed, reason, remaining = check_usage_allowed(user['id'], tier)
         if not allowed:
@@ -1284,6 +1293,19 @@ def analyze():
                 'reason':    reason,
                 'tier':      tier,
                 'upgrade':   'Visit lumiveil.github.io/#pricing to upgrade'
+            }), 429
+    else:
+        # Guest request — no account, so track usage by hashed client IP
+        # instead. This is the persistent (DB-backed) cap that replaces the
+        # old behaviour where anonymous requests were never tracked at all.
+        guest_ip_hash = hashlib.sha256(get_remote_address().encode()).hexdigest()
+        allowed, reason, remaining = check_guest_usage_allowed(guest_ip_hash)
+        if not allowed:
+            return jsonify({
+                'error':   'Usage limit reached',
+                'reason':  reason,
+                'tier':    'guest',
+                'upgrade': 'Sign up free at lumiveil.github.io to keep your own tracked limit, or upgrade to Pro.'
             }), 429
 
     # -- Parse body --
@@ -1413,10 +1435,13 @@ def analyze():
     else:
         summary = '⚠️ This content has mixed signals. Verify with trusted sources before sharing.'
 
-    # -- Track usage (only for logged-in users) --
+    # -- Track usage (logged-in users get a DB row; guests get an IP-hash row) --
     if user:
         increment_usage(user['id'])
         remaining_after = max(0, TIER_LIMITS[tier]['daily_limit'] - (get_usage_today(user['id'])[0]))
+    elif guest_ip_hash:
+        increment_guest_usage(guest_ip_hash)
+        remaining_after = max(0, remaining - 1)
     else:
         remaining_after = None
 

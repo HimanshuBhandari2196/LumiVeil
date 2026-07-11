@@ -45,6 +45,19 @@ CREATE TABLE IF NOT EXISTS usage (
     UNIQUE(user_id, date)
 );
 
+-- Anonymous / guest usage, keyed by a hashed client IP rather than a user
+-- account. This is what actually enforces the "30 analyses/day" guest cap
+-- shown in the extension UI — it did not exist before, so guests were
+-- effectively unlimited once the in-memory rate limiter reset.
+CREATE TABLE IF NOT EXISTS guest_usage (
+    id         SERIAL PRIMARY KEY,
+    ip_hash    TEXT    NOT NULL,
+    date       TEXT    NOT NULL,
+    count      INTEGER NOT NULL DEFAULT 0,
+    last_used  TEXT,
+    UNIQUE(ip_hash, date)
+);
+
 CREATE TABLE IF NOT EXISTS payments (
     id           SERIAL PRIMARY KEY,
     user_id      INTEGER NOT NULL REFERENCES users(id),
@@ -252,6 +265,62 @@ def check_usage_allowed(user_id, tier):
         return False, f'Daily limit reached. Refresh in {wait_mins} minutes.', 0
 
     return False, f'Daily limit of {daily_limit} analyses reached. Upgrade to Pro for more.', 0
+
+
+# ---------------------------------------------------------------------------
+# GUEST USAGE HELPERS
+# ---------------------------------------------------------------------------
+# Anonymous requests (no JWT) are identified by a hashed client IP instead
+# of a user id. This is the persistent, DB-backed cap that replaces the old
+# "no tracking at all" behaviour — it survives server restarts, unlike the
+# in-memory Flask-Limiter counters.
+
+GUEST_DAILY_LIMIT = TIER_LIMITS['free']['daily_limit']
+
+
+def get_guest_usage_today(ip_hash):
+    today = date.today().isoformat()
+    conn  = get_db()
+    cur   = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute(
+        "SELECT count, last_used FROM guest_usage WHERE ip_hash = %s AND date = %s",
+        (ip_hash, today)
+    )
+    row = cur.fetchone()
+    cur.close(); conn.close()
+    if row:
+        return row['count'], row['last_used']
+    return 0, None
+
+
+def increment_guest_usage(ip_hash):
+    today = date.today().isoformat()
+    now   = datetime.utcnow().isoformat()
+    conn  = get_db()
+    cur   = conn.cursor()
+    cur.execute("""
+        INSERT INTO guest_usage (ip_hash, date, count, last_used)
+        VALUES (%s, %s, 1, %s)
+        ON CONFLICT (ip_hash, date)
+        DO UPDATE SET count = guest_usage.count + 1, last_used = EXCLUDED.last_used
+    """, (ip_hash, today, now))
+    conn.commit()
+    cur.close(); conn.close()
+
+
+def check_guest_usage_allowed(ip_hash):
+    """
+    Guests get a flat daily cap (same number as the free tier) with no
+    refresh-window grace period — that's reserved for account holders.
+    Returns (allowed: bool, reason: str, remaining: int).
+    """
+    count, _ = get_guest_usage_today(ip_hash)
+    if count < GUEST_DAILY_LIMIT:
+        return True, 'ok', GUEST_DAILY_LIMIT - count
+    return False, (
+        f'Guest daily limit of {GUEST_DAILY_LIMIT} analyses reached. '
+        f'Sign up for a free account to keep your own tracked limit.'
+    ), 0
 
 
 # ---------------------------------------------------------------------------
