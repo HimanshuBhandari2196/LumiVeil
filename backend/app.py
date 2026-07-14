@@ -43,6 +43,8 @@ from dotenv import load_dotenv
 from database import init_db, get_user_by_email, create_user, check_usage_allowed, increment_usage, TIER_LIMITS, get_usage_today, update_last_login, create_email_verification_token, verify_email_token, create_password_reset_token, verify_password_reset_token, consume_password_reset_token, check_guest_usage_allowed, increment_guest_usage
 from auth import hash_password, verify_password, generate_token, get_user_from_token, issue_token_pair, refresh_access_token, revoke_refresh_token_plaintext
 from email_service import send_verification_email, send_password_reset_email
+from sensational_phrases import SENSATIONAL_PHRASES
+from semantic_match import find_semantic_matches
 
 load_dotenv()
 
@@ -832,64 +834,19 @@ def check_sensationalism(text):
     """
     Scan text for sensational / misinformation language patterns.
     Returns (count: int, flags: list[str]).
-    """
-    sensational_words = [
-        # Urgency & fear
-        'shocking', 'terrifying', 'horrifying', 'disturbing', 'alarming',
-        'devastating', 'catastrophic', 'emergency', 'crisis', 'panic',
-        'chaos', 'mayhem', 'disaster',
-        # Conspiracy
-        'they dont want you to know', 'secret revealed',
-        'what mainstream media wont tell', 'suppressed', 'censored',
-        'banned', 'deep state', 'new world order', 'illuminati',
-        'false flag', 'crisis actor', 'wake up', 'sheeple',
-        'shadow government', 'they are hiding', 'cover up', 'coverup',
-        # Clickbait
-        'explosive', 'bombshell', 'leaked', 'exclusive', 'breaking',
-        'viral', 'exposed', 'miracle', 'hoax', 'conspiracy',
-        'you wont believe', 'mind blowing', 'mind-blowing',
-        'jaw dropping', 'jaw-dropping', 'game changer', 'game-changer',
-        'this changes everything', 'nothing will be the same',
-        'share before deleted', 'share before they delete',
-        'watch before removed', 'watch before banned',
-        # Medical misinformation
-        'miracle cure', 'doctors dont want you', 'big pharma hiding',
-        'natural cure banned', 'cancer cure suppressed', 'doctors exposed',
-        'vaccine kills', 'poison in', 'toxins in', 'detox miracle',
-        'cure for everything', 'big pharma doesnt want',
-        'medical establishment hiding',
-        # Political manipulation
-        'election stolen', 'voter fraud proof', 'rigged election',
-        'deep state plot', 'globalist agenda', 'socialist takeover',
-        'communist infiltration', 'radical left', 'extreme right',
-        'they are replacing', 'great replacement', 'population control',
-        # Financial misinformation
-        'get rich quick', 'make money fast', 'guaranteed returns',
-        'risk free investment', 'bitcoin millionaire', 'secret investment',
-        'banks dont want you', 'financial secret',
-        'retire in 30 days', 'unlimited income',
-        # Religious / apocalyptic manipulation
-        'end times', 'apocalypse now', 'prophecy fulfilled',
-        'sign of the end', 'biblical prophecy',
-        'god told me', 'divine revelation exclusive',
-        # Fake credibility signals
-        'scientists baffled', 'doctors stunned', 'experts shocked',
-        'government admits', 'finally admitted', 'officially confirmed',
-        'leaked documents prove', 'insider reveals',
-        'whistleblower exposes', 'anonymous source confirms',
-        # Emotional manipulation
-        'will make you cry', 'will restore your faith',
-        'will make you sick', 'will make you angry',
-        'will shock you', 'prepare to be amazed',
-        'you need to see this', 'everyone is talking about',
-        'the truth is out', 'finally the truth',
-    ]
 
+    Two passes:
+      1. Exact-match against SENSATIONAL_PHRASES (instant, free, always runs)
+      2. If pass 1 finds nothing, a semantic (paraphrase) check via
+         embeddings — catches reworded versions of the same phrases.
+         Only runs when needed, so most requests never pay the extra
+         latency/cost of an embedding API call.
+    """
     count    = 0
     flags    = []
     text_low = text.lower()
 
-    for phrase in sensational_words:
+    for phrase in SENSATIONAL_PHRASES:
         if phrase in text_low:
             count += 1
             flags.append(f'❌ Sensational language: "{phrase}"')
@@ -903,6 +860,22 @@ def check_sensationalism(text):
     if exclamations > 3:
         count += 1
         flags.append(f'❌ Excessive exclamation marks ({exclamations} found)')
+
+    # Semantic fallback — only when the exact-match pass found nothing,
+    # so the common case (obviously sensational content) never touches it.
+    if count == 0 and len(text.strip()) > 40:
+        try:
+            semantic_matches = find_semantic_matches(text)
+            for sentence, phrase, similarity in semantic_matches:
+                count += 1
+                flags.append(
+                    f'⚠️ Sensational language (paraphrased): "{sentence[:80]}" '
+                    f'— similar to "{phrase}"'
+                )
+        except Exception:
+            # Embeddings API unavailable/failed — degrade gracefully to
+            # exact-match-only results rather than breaking the analysis.
+            pass
 
     return count, flags
 
