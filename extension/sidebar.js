@@ -114,7 +114,11 @@ document.addEventListener('DOMContentLoaded', function () {
     const checksList = document.getElementById('checksList');
     checksList.innerHTML = '';
     if (result.checks && result.checks.length > 0) {
-      const flagCount = result.checks.filter(c => c.includes('X')).length;
+      // Backend prefixes real concerns with ❌ (hard flag) or ⚠️ (warning) —
+      // ✅/ℹ️/🔍 etc. are neutral/positive status lines, not red flags.
+      // (Previously checked for the letter 'X', which never matched the
+      // ❌ emoji at all — this always showed "0 red flags".)
+      const flagCount = result.checks.filter(c => c.includes('❌') || c.includes('⚠️')).length;
       checksPreviewText.textContent = result.checks.length + ' checks — ' + flagCount + ' red flags';
       result.checks.forEach(function (check) {
         const li = document.createElement('li');
