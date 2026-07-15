@@ -414,13 +414,13 @@ def check_with_google_factcheck(claim):
 def analyze_with_gemini(claim, context=''):
     """
     Use Gemini Flash with Google Search grounding to fact-check a claim.
-    Returns (score_adjustment: int, flags: list[str], summary: str)
+    Returns (score_adjustment: int, flags: list[str], summary: str, sources: list[str])
 
     score_adjustment is positive (credible) or negative (questionable).
     Falls back gracefully if API key missing or quota exceeded.
     """
     if not GEMINI_API_KEY:
-        return 0, [], ''
+        return 0, [], '', []
 
     prompt = f"""You are a fact-checker. Analyze this claim and determine if it is likely true, false, or unverifiable.
 
@@ -466,10 +466,10 @@ Respond in this exact JSON format (no markdown, no backticks):
             elif resp.status_code == 503:
                 continue  # Try next model
             else:
-                return 0, [f'⚠️ AI fact-check unavailable (status {resp.status_code}): {resp.text[:100]}'], ''
+                return 0, [f'⚠️ AI fact-check unavailable (status {resp.status_code}): {resp.text[:100]}'], '', []
 
         if not resp or resp.status_code != 200:
-            return 0, ['⚠️ AI fact-check temporarily unavailable — all models overloaded. Try again shortly.'], ''
+            return 0, ['⚠️ AI fact-check temporarily unavailable — all models overloaded. Try again shortly.'], '', []
 
         data = resp.json()
         text = ''
@@ -477,7 +477,7 @@ Respond in this exact JSON format (no markdown, no backticks):
         # Gemini with search grounding may return content in different structures
         candidates = data.get('candidates', [])
         if not candidates:
-            return 0, ['⚠️ AI fact-check returned no candidates'], ''
+            return 0, ['⚠️ AI fact-check returned no candidates'], '', []
 
         candidate = candidates[0]
         content   = candidate.get('content', {})
@@ -493,7 +493,7 @@ Respond in this exact JSON format (no markdown, no backticks):
                 text = candidate['text']
 
         if not text:
-            return 0, ['ℹ️ AI analysis completed — no text response received'], ''
+            return 0, ['ℹ️ AI analysis completed — no text response received'], '', []
 
         # Clean and parse JSON response
         text = text.strip()
@@ -506,7 +506,7 @@ Respond in this exact JSON format (no markdown, no backticks):
         try:
             result = json.loads(text)
         except json.JSONDecodeError:
-            return 0, ['ℹ️ AI analysis completed but response was unclear'], ''
+            return 0, ['ℹ️ AI analysis completed but response was unclear'], '', []
 
         verdict    = result.get('verdict', 'unverifiable')
         confidence = int(result.get('confidence', 50))
@@ -538,10 +538,10 @@ Respond in this exact JSON format (no markdown, no backticks):
         if sources:
             flags.append(f'🔍 Suggested sources: {", ".join(sources[:3])}')
 
-        return score_adjustment, flags, reasoning
+        return score_adjustment, flags, reasoning, sources
 
     except Exception as e:
-        return 0, [f'⚠️ AI fact-check error: {str(e)[:80]}'], ''
+        return 0, [f'⚠️ AI fact-check error: {str(e)[:80]}'], '', []
 
 
 # ===========================================================================
@@ -1305,6 +1305,8 @@ def analyze():
     url_score     = 50
     image_penalty = 0
     sensational_count = 0
+    real_info_parts = []   # actual verified facts found during analysis, if any
+    real_sources     = []  # actual source URLs found during analysis, if any
 
     if is_image:
         # Image analysis — Pro/Max only
@@ -1351,16 +1353,26 @@ def analyze():
                     for r in fc_results[:2]:
                         rating = r.get('rating', 'Unknown')
                         publisher = r.get('publisher', 'Unknown')
+                        title = r.get('title', '')
+                        url_field = r.get('url', '')
                         all_flags.append(f'📋 Fact-checked by {publisher}: "{rating}"')
+                        real_info_parts.append(
+                            f'{publisher} rated this "{rating}"' + (f' — {title}' if title else '')
+                        )
+                        if url_field:
+                            real_sources.append(url_field)
                         if any(w in rating.lower() for w in ['false', 'fake', 'incorrect', 'misleading']):
                             url_score -= 25
                         elif any(w in rating.lower() for w in ['true', 'correct', 'accurate']):
                             url_score += 15
                 else:
                     # Fall back to Gemini
-                    score_adj, gemini_flags, _ = analyze_with_gemini(page_text[:500])
+                    score_adj, gemini_flags, gemini_reasoning, gemini_sources = analyze_with_gemini(page_text[:500])
                     url_score = max(0, min(100, url_score + score_adj))
                     all_flags.extend(gemini_flags)
+                    if gemini_reasoning:
+                        real_info_parts.append(gemini_reasoning)
+                    real_sources.extend(gemini_sources)
         else:
             all_flags.append('⚠️ Could not fetch page content for text analysis')
 
@@ -1379,9 +1391,15 @@ def analyze():
                 rating    = r.get('rating', 'Unknown')
                 publisher = r.get('publisher', 'Unknown')
                 title     = r.get('title', '')
+                url_field = r.get('url', '')
                 all_flags.append(f'  • {publisher}: "{rating}"')
                 if title:
                     all_flags.append(f'    "{title[:80]}"')
+                real_info_parts.append(
+                    f'{publisher} rated this "{rating}"' + (f' — {title}' if title else '')
+                )
+                if url_field:
+                    real_sources.append(url_field)
                 # Adjust score based on rating
                 rating_low = rating.lower()
                 if any(w in rating_low for w in ['false', 'fake', 'incorrect', 'misleading', 'pants on fire']):
@@ -1393,9 +1411,12 @@ def analyze():
         else:
             all_flags.append('ℹ️ No existing fact-checks found — running AI analysis...')
             # Run Gemini with Google Search grounding
-            score_adj, gemini_flags, gemini_summary = analyze_with_gemini(user_input)
+            score_adj, gemini_flags, gemini_reasoning, gemini_sources = analyze_with_gemini(user_input)
             url_score = max(0, min(100, 50 + score_adj))
             all_flags.extend(gemini_flags)
+            if gemini_reasoning:
+                real_info_parts.append(gemini_reasoning)
+            real_sources.extend(gemini_sources)
 
     # -- Score + verdict --
     final_score = calculate_final_score(url_score, sensational_count, all_flags)
@@ -1418,13 +1439,33 @@ def analyze():
     else:
         remaining_after = None
 
+    # -- "What is real" — built from actual findings above. Falls back to
+    # a generic pointer only when no fact-check data was found at all,
+    # instead of always showing the same message regardless of results. --
+    if real_info_parts:
+        real_info = ' | '.join(real_info_parts[:3])
+    else:
+        real_info = ('No existing fact-checks found for this claim. Always cross-check with '
+                     'Reuters, BBC, AP News, or The Hindu for verified information.')
+
+    if real_sources:
+        seen = set()
+        sources = []
+        for s in real_sources:
+            if s not in seen:
+                seen.add(s)
+                sources.append(s)
+        sources = sources[:5]
+    else:
+        sources = ['reuters.com', 'bbc.com', 'apnews.com', 'thehindu.com', 'ndtv.com']
+
     response = {
         'verdict':     verdict,
         'trust_score': final_score,
         'summary':     summary,
         'checks':      all_flags or ['✅ No red flags detected'],
-        'real_info':   'Always cross-check with Reuters, BBC, AP News, or The Hindu for verified information.',
-        'sources':     ['reuters.com', 'bbc.com', 'apnews.com', 'thehindu.com', 'ndtv.com'],
+        'real_info':   real_info,
+        'sources':     sources,
         'tier':        tier,
     }
     if remaining_after is not None:

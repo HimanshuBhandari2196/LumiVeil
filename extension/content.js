@@ -156,10 +156,11 @@ function createBanner(result) {
   const isFake  = result.verdict === 'fake';
   const isMixed = result.verdict === 'mixed';
   const score   = result.trust_score;
-  // Match the definition used in sidebar.js's full report — ❌ (hard flag)
-  // and ⚠️ (warning, e.g. AI-image/deepfake detection, paraphrased
-  // sensational language) both count; ✅/ℹ️/🔍 are neutral/positive.
-  const flags = result.checks ? result.checks.filter(c => c.includes('❌') || c.includes('⚠️')).length : 0;
+  // Match the definition used in sidebar.js's full report — ❌ (hard flag),
+  // ⚠️ (warning, e.g. AI-image/deepfake detection, paraphrased sensational
+  // language), and 🚩 (AI fact-check's own red_flags) all count;
+  // ✅/ℹ️/🔍/💭 are neutral/positive.
+  const flags = result.checks ? result.checks.filter(c => c.includes('❌') || c.includes('⚠️') || c.includes('🚩')).length : 0;
 
   const title    = isFake
     ? 'This page may contain fake or misleading content'

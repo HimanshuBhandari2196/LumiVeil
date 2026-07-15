@@ -114,12 +114,11 @@ document.addEventListener('DOMContentLoaded', function () {
     const checksList = document.getElementById('checksList');
     checksList.innerHTML = '';
     if (result.checks && result.checks.length > 0) {
-      // Backend prefixes real concerns with ❌ (hard flag) or ⚠️ (warning) —
-      // ✅/ℹ️/🔍 etc. are neutral/positive status lines, not red flags.
-      // (Previously checked for the letter 'X', which never matched the
-      // ❌ emoji at all — this always showed "0 red flags".)
-      const flagCount = result.checks.filter(c => c.includes('❌') || c.includes('⚠️')).length;
-      checksPreviewText.textContent = result.checks.length + ' checks — ' + flagCount + ' red flags';
+      // Backend prefixes real concerns with ❌ (hard flag), ⚠️ (warning),
+      // or 🚩 (AI fact-check's own red_flags list) — ✅/ℹ️/🔍/💭 etc. are
+      // neutral/positive status lines, not red flags.
+      const flagCount = result.checks.filter(c => c.includes('❌') || c.includes('⚠️') || c.includes('🚩')).length;
+      checksPreviewText.textContent = result.checks.length + ' checks — ' + flagCount + (flagCount === 1 ? ' red flag' : ' red flags');
       result.checks.forEach(function (check) {
         const li = document.createElement('li');
         li.textContent = check;
@@ -136,7 +135,16 @@ document.addEventListener('DOMContentLoaded', function () {
     if (result.sources && result.sources.length > 0) {
       result.sources.forEach(function (source) {
         const li = document.createElement('li');
-        li.textContent = source;
+        // Real fact-check results are full URLs; the generic fallback list
+        // is bare domain names (e.g. "reuters.com") — link both correctly.
+        const isUrl = /^https?:\/\//i.test(source);
+        const href  = isUrl ? source : `https://${source}`;
+        const a = document.createElement('a');
+        a.href = href;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        a.textContent = source;
+        li.appendChild(a);
         sourcesList.appendChild(li);
       });
     } else {

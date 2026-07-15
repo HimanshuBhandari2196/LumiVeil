@@ -298,6 +298,10 @@ body {
   padding: 8px 0; border-bottom: 1px solid var(--border);
 }
 .sources-list li:last-child { border-bottom: none; }
+.sources-list li a {
+  color: inherit; text-decoration: none; overflow-wrap: anywhere;
+}
+.sources-list li a:hover { text-decoration: underline; }
 .sources-list li::before {
   content: ''; width: 5px; height: 5px; border-radius: 50%;
   background: var(--accent); flex-shrink: 0;
