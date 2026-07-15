@@ -818,8 +818,16 @@ def check_url_credibility(url, locale=None):
                 break
 
     if not matched:
-        flags.append('⚠️ Domain not in our trusted list')
-        score -= 10
+        # Not being on our ~150-site hand-picked list isn't evidence of
+        # anything — the internet has millions of legitimate publications
+        # we simply haven't added. This used to cost -10 points and show
+        # as a ⚠️ warning (counted as a "red flag" in the UI), which meant
+        # an unrecognized-but-perfectly-legitimate source started right at
+        # the fake/mixed boundary — any single coincidental keyword match
+        # would tip it into "FAKE". Now it's purely informational (ℹ️, no
+        # penalty), and the actual verdict comes from the AI fact-check
+        # pipeline run on the article content itself.
+        flags.append('ℹ️ Domain not in our curated trusted list — evaluated by content instead')
 
     # Suspicious URL patterns
     for pattern in suspicious_patterns:
@@ -1349,38 +1357,48 @@ def analyze():
             sensational_count, sens_flags = check_sensationalism(page_text)
             all_flags.extend(sens_flags)
 
-            # For social media URLs, also run Gemini fact-check on the page text
             social_domains = ['twitter.com', 'x.com', 'facebook.com', 'instagram.com',
                             'reddit.com', 'tiktok.com', 'linkedin.com', 'telegram.org']
             is_social = any(d in user_input.lower() for d in social_domains)
-            if is_social and page_text:
-                all_flags.append('🔍 Running AI fact-check on social media content...')
-                # Google Fact Check first
-                found, fc_results = check_with_google_factcheck(page_text[:300])
-                if found:
-                    for r in fc_results[:2]:
-                        rating = r.get('rating', 'Unknown')
-                        publisher = r.get('publisher', 'Unknown')
-                        title = r.get('title', '')
-                        url_field = r.get('url', '')
-                        all_flags.append(f'📋 Fact-checked by {publisher}: "{rating}"')
-                        real_info_parts.append(
-                            f'{publisher} rated this "{rating}"' + (f' — {title}' if title else '')
-                        )
-                        if url_field:
-                            real_sources.append(url_field)
-                        if any(w in rating.lower() for w in ['false', 'fake', 'incorrect', 'misleading']):
-                            url_score -= 25
-                        elif any(w in rating.lower() for w in ['true', 'correct', 'accurate']):
-                            url_score += 15
-                else:
-                    # Fall back to Gemini
-                    score_adj, gemini_flags, gemini_reasoning, gemini_sources = analyze_with_gemini(page_text[:500])
-                    url_score = max(0, min(100, url_score + score_adj))
-                    all_flags.extend(gemini_flags)
-                    if gemini_reasoning:
-                        real_info_parts.append(gemini_reasoning)
-                    real_sources.extend(gemini_sources)
+
+            # Real fact-checking (Google Fact Check DB, then Gemini AI as a
+            # fallback) now runs for ANY article URL, not just social media.
+            # Previously, a news article from a domain that just wasn't on
+            # our ~150-site trusted list got no AI evaluation at all — it
+            # was judged purely by domain-list membership + keyword
+            # matching, which meant legitimate journalism from a source we
+            # simply hadn't added yet had no way to demonstrate that.
+            fact_check_label = ('Running AI fact-check on social media content...' if is_social
+                                 else 'Checking for existing fact-checks on this article...')
+            all_flags.append(f'🔍 {fact_check_label}')
+
+            found, fc_results = check_with_google_factcheck(page_text[:300])
+            if found:
+                for r in fc_results[:2]:
+                    rating = r.get('rating', 'Unknown')
+                    publisher = r.get('publisher', 'Unknown')
+                    title = r.get('title', '')
+                    url_field = r.get('url', '')
+                    all_flags.append(f'📋 Fact-checked by {publisher}: "{rating}"')
+                    real_info_parts.append(
+                        f'{publisher} rated this "{rating}"' + (f' — {title}' if title else '')
+                    )
+                    if url_field:
+                        real_sources.append(url_field)
+                    if any(w in rating.lower() for w in ['false', 'fake', 'incorrect', 'misleading']):
+                        url_score -= 25
+                    elif any(w in rating.lower() for w in ['true', 'correct', 'accurate']):
+                        url_score += 15
+            else:
+                # Fall back to Gemini — this is what gives an unrecognized
+                # but legitimate article a genuine shot at a fair verdict,
+                # instead of just "not on our list" + keyword matching.
+                score_adj, gemini_flags, gemini_reasoning, gemini_sources = analyze_with_gemini(page_text[:500])
+                url_score = max(0, min(100, url_score + score_adj))
+                all_flags.extend(gemini_flags)
+                if gemini_reasoning:
+                    real_info_parts.append(gemini_reasoning)
+                real_sources.extend(gemini_sources)
         else:
             all_flags.append('⚠️ Could not fetch page content for text analysis')
 
