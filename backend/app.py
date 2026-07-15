@@ -1287,10 +1287,13 @@ def analyze():
         return jsonify({'error': 'Request body must be JSON'}), 400
 
     user_input = body.get('input', '')
+    client_page_text = body.get('page_text', '')   # optional — see is_url branch below
     locale     = body.get('locale', '')   # BCP-47 locale from browser e.g. 'en-IN'
     valid, errors = _validate_input(user_input)
     if not valid:
         return jsonify({'error': 'Invalid input', 'details': errors}), 400
+    if client_page_text:
+        client_page_text = str(client_page_text)[:3000]
 
     # Sanitise locale — only allow safe characters
     import re as _re
@@ -1336,7 +1339,12 @@ def analyze():
         url_score, url_flags = check_url_credibility(user_input, locale=locale)
         all_flags.extend(url_flags)
 
-        page_text = fetch_page_text(user_input)
+        # Prefer the page text the browser actually rendered (sent by the
+        # extension's content script) over a server-side re-fetch — it's
+        # more accurate (handles JS-rendered content) and avoids a second
+        # network round-trip. Falls back to fetching it ourselves for the
+        # manual "paste a URL" flow, which doesn't have page text to send.
+        page_text = client_page_text or fetch_page_text(user_input)
         if page_text:
             sensational_count, sens_flags = check_sensationalism(page_text)
             all_flags.extend(sens_flags)

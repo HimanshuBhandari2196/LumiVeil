@@ -5,6 +5,26 @@ const BACKEND_URL    = 'https://lumiveil-api-production-8706.up.railway.app/api/
 const SCORE_THRESHOLD = 40;
 const ANALYSIS_DELAY  = 2000;
 
+// Platforms that were never news/article content to begin with — search
+// engines, streaming/OTT, e-commerce, productivity tools. Auto-analysis
+// skips these entirely rather than scoring them as if they were
+// (possibly fake) news, which produced confusing false positives like
+// flagging a Google search results page or a Hotstar show listing.
+// Add more here as they come up — this list can't be exhaustive, but it
+// covers the common cases people actually browse day to day.
+const NON_NEWS_DOMAINS = [
+  // Search engines
+  'google.com', 'bing.com', 'duckduckgo.com', 'search.yahoo.com', 'yandex.com',
+  // Streaming / OTT
+  'netflix.com', 'hotstar.com', 'primevideo.com', 'disneyplus.com', 'hulu.com',
+  'jiocinema.com', 'sonyliv.com', 'zee5.com', 'spotify.com', 'youtube.com',
+  // E-commerce
+  'amazon.com', 'amazon.in', 'flipkart.com', 'ebay.com', 'etsy.com',
+  // Productivity / webmail / cloud tools
+  'mail.google.com', 'docs.google.com', 'drive.google.com', 'calendar.google.com',
+  'outlook.com', 'notion.so', 'slack.com', 'zoom.us',
+];
+
 // ============================================================
 // WEBSITE → EXTENSION LOGIN BRIDGE
 // When the user signs in on the LumiVeil website, the page
@@ -223,14 +243,20 @@ function analyzePage() {
       url.startsWith('about:') ||
       url.startsWith('moz-extension://')) return;
 
-  const pageText       = document.body ? document.body.innerText.slice(0, 3000) : '';
-  const inputToAnalyze = url + ' ' + pageText;
+  const hostname = window.location.hostname.replace(/^www\./, '');
+  if (NON_NEWS_DOMAINS.some(d => hostname === d || hostname.endsWith('.' + d))) {
+    console.log('LumiVeil: Skipping non-news platform:', hostname);
+    return;
+  }
+
+  const pageText = document.body ? document.body.innerText.slice(0, 3000) : '';
 
   console.log('LumiVeil: Analyzing page...');
 
   chrome.runtime.sendMessage({
     action: 'analyze',
-    input:  inputToAnalyze,
+    input:  url,       // clean URL — used for domain/pattern checks
+    text:   pageText,  // actual page content — used for sensationalism checks
     locale: navigator.language || ''
   }, function (response) {
     if (response && response.success) {
