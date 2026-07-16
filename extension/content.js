@@ -23,6 +23,9 @@ const NON_NEWS_DOMAINS = [
   // Productivity / webmail / cloud tools
   'mail.google.com', 'docs.google.com', 'drive.google.com', 'calendar.google.com',
   'outlook.com', 'notion.so', 'slack.com', 'zoom.us',
+  // AI chat interfaces — conversational replies aren't news claims either
+  'chatgpt.com', 'chat.openai.com', 'claude.ai', 'gemini.google.com',
+  'perplexity.ai', 'copilot.microsoft.com', 'poe.com', 'grok.com',
 ];
 
 // ============================================================
@@ -247,6 +250,33 @@ function analyzePage() {
   if (NON_NEWS_DOMAINS.some(d => hostname === d || hostname.endsWith('.' + d))) {
     console.log('LumiVeil: Skipping non-news platform:', hostname);
     return;
+  }
+
+  // Backstop for sites NOT on the list above (which can never be
+  // exhaustive — e.g. new AI chat tools, dashboards, web apps we haven't
+  // thought to add yet). A real news article almost always has either a
+  // semantic <article> tag, an og:type=article meta tag, or several
+  // substantial <p> paragraphs. Chat UIs, dashboards, and similar app
+  // interfaces typically have none of these, so treat their absence as a
+  // signal this probably isn't an article worth auto-analyzing.
+  // Social media platforms are exempt from this check — short posts are
+  // expected there, and the backend has dedicated logic (is_social) built
+  // specifically to fact-check them despite not looking like articles.
+  const socialDomains = ['twitter.com', 'x.com', 'facebook.com', 'instagram.com',
+                        'reddit.com', 'tiktok.com', 'linkedin.com', 'telegram.org'];
+  const isSocialPlatform = socialDomains.some(d => hostname === d || hostname.endsWith('.' + d));
+
+  if (!isSocialPlatform) {
+    const hasArticleTag = !!document.querySelector('article');
+    const ogType = document.querySelector('meta[property="og:type"]');
+    const isArticleMeta = ogType && ogType.content === 'article';
+    const substantialParagraphs = Array.from(document.querySelectorAll('p'))
+      .filter(p => p.innerText && p.innerText.trim().length > 40).length;
+
+    if (!hasArticleTag && !isArticleMeta && substantialParagraphs < 3) {
+      console.log('LumiVeil: Skipping — page does not look like an article:', hostname);
+      return;
+    }
   }
 
   const pageText = document.body ? document.body.innerText.slice(0, 3000) : '';
