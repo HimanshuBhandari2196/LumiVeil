@@ -549,7 +549,19 @@ Respond in this exact JSON format (no markdown, no backticks):
 # ===========================================================================
 
 def fetch_page_text(url):
-    """Fetch visible paragraph text from a URL (max 3000 chars)."""
+    """Fetch visible paragraph text from a URL (max 3000 chars).
+
+    Many modern news sites render their real content with JavaScript,
+    which this plain HTTP fetch can't execute — instead of the actual
+    article, we sometimes get back a fallback notice like "please enable
+    JavaScript and disable your ad blocker". That text would otherwise
+    sail straight through fact-checking and sensationalism analysis as if
+    it were the real claim, producing a misleading report on nonsense
+    rather than an honest "couldn't read this page" message. Detect that
+    failure mode here and return None (same as any other fetch failure),
+    so the caller falls back to its existing "could not fetch content"
+    message instead of analyzing a placeholder notice.
+    """
     try:
         resp = http_requests.get(
             url,
@@ -558,7 +570,24 @@ def fetch_page_text(url):
         )
         soup = BeautifulSoup(resp.text, 'html.parser')
         text = ' '.join(p.get_text() for p in soup.find_all('p'))
-        return text[:3000]
+        text = text[:3000]
+
+        text_low = text.lower()
+        blocked_signatures = [
+            'enable javascript', 'enable js', 'disable your ad blocker',
+            'disable any ad blocker', 'disable ad blocker', 'please enable cookies',
+            'unsupported browser', 'verify you are a human', 'checking your browser',
+            'are you a robot', 'access denied', 'please turn on javascript',
+        ]
+        if any(sig in text_low for sig in blocked_signatures):
+            return None
+        if len(text.strip()) < 60:
+            # Suspiciously little real content — likely an empty shell
+            # page waiting on JS to render, rather than a genuinely short
+            # article.
+            return None
+
+        return text
     except Exception:
         return None
 
@@ -1427,7 +1456,11 @@ def analyze():
             sensational_count, sens_flags = check_sensationalism(page_text)
             all_flags.extend(sens_flags)
         else:
-            all_flags.append('⚠️ Could not fetch page content for text analysis')
+            all_flags.append(
+                "ℹ️ Couldn't read this page's real content (it may require JavaScript to "
+                "load) — install and browse with the LumiVeil extension instead, which reads "
+                "the page as your browser actually renders it."
+            )
 
     else:
         # Plain text or social media post pasted directly.
