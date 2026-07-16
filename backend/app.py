@@ -888,20 +888,38 @@ def check_sensationalism(text):
     return count, flags
 
 
-def calculate_final_score(url_score, sensational_count, flags):
+def calculate_final_score(url_score, sensational_count, flags, fact_check_confident=False):
     """
     Combine URL score, sensationalism penalty, and flag-based bonuses/penalties
     into a final 0-100 trust score.
+
+    fact_check_confident: True when a real fact-check verdict was reached —
+    either an existing fact-checker rating was found, or Gemini returned a
+    confident true/false/misleading verdict (not 'unverifiable'). Tone
+    (sensational language) is a much weaker signal than an actual
+    verified-or-debunked finding, so it's dampened to a small nudge rather
+    than a full penalty when we already know the real answer. It's only
+    given full weight as a tie-breaker when fact-checking couldn't reach a
+    verdict at all — e.g. a claim with no existing fact-check and an
+    inconclusive AI read. This prevents a true, well-sourced story that's
+    written in a dramatic tone (e.g. genuinely describing a war or
+    disaster) from being dragged down as if tone were evidence of falsehood.
     """
     score = url_score
 
-    # Sensationalism penalty (exponential)
+    # Sensationalism penalty (exponential), dampened when we already have
+    # real evidence from fact-checking — capped at a small max nudge.
     if sensational_count <= 2:
-        score -= sensational_count * 5
+        sensational_penalty = sensational_count * 5
     elif sensational_count <= 5:
-        score -= sensational_count * 8
+        sensational_penalty = sensational_count * 8
     else:
-        score -= sensational_count * 12
+        sensational_penalty = sensational_count * 12
+
+    if fact_check_confident:
+        sensational_penalty = min(sensational_penalty, 5)
+
+    score -= sensational_penalty
 
     # Flag-based adjustments
     fact_checkers = [
@@ -1318,6 +1336,7 @@ def analyze():
     sensational_count = 0
     real_info_parts = []   # actual verified facts found during analysis, if any
     real_sources     = []  # actual source URLs found during analysis, if any
+    fact_check_confident = False  # True once a real verdict (not 'unverifiable') is reached
 
     if is_image:
         # Image analysis — Pro/Max only
@@ -1354,20 +1373,13 @@ def analyze():
         # manual "paste a URL" flow, which doesn't have page text to send.
         page_text = client_page_text or fetch_page_text(user_input)
         if page_text:
-            sensational_count, sens_flags = check_sensationalism(page_text)
-            all_flags.extend(sens_flags)
-
             social_domains = ['twitter.com', 'x.com', 'facebook.com', 'instagram.com',
                             'reddit.com', 'tiktok.com', 'linkedin.com', 'telegram.org']
             is_social = any(d in user_input.lower() for d in social_domains)
 
-            # Real fact-checking (Google Fact Check DB, then Gemini AI as a
-            # fallback) now runs for ANY article URL, not just social media.
-            # Previously, a news article from a domain that just wasn't on
-            # our ~150-site trusted list got no AI evaluation at all — it
-            # was judged purely by domain-list membership + keyword
-            # matching, which meant legitimate journalism from a source we
-            # simply hadn't added yet had no way to demonstrate that.
+            # Fact-check FIRST — this is the real evidence. Tone/style
+            # analysis (below) only gets full weight as a secondary signal
+            # when this can't reach a confident verdict.
             fact_check_label = ('Running AI fact-check on social media content...' if is_social
                                  else 'Checking for existing fact-checks on this article...')
             all_flags.append(f'🔍 {fact_check_label}')
@@ -1389,6 +1401,7 @@ def analyze():
                         url_score -= 25
                     elif any(w in rating.lower() for w in ['true', 'correct', 'accurate']):
                         url_score += 15
+                fact_check_confident = True
             else:
                 # Fall back to Gemini — this is what gives an unrecognized
                 # but legitimate article a genuine shot at a fair verdict,
@@ -1399,15 +1412,27 @@ def analyze():
                 if gemini_reasoning:
                     real_info_parts.append(gemini_reasoning)
                 real_sources.extend(gemini_sources)
+                # A confident verdict shows up as one of these specific
+                # flag prefixes — 'unverifiable' produces neither.
+                fact_check_confident = any(
+                    f.startswith('✅ AI fact-check: Likely true')
+                    or f.startswith('❌ AI fact-check: Likely false')
+                    or f.startswith('⚠️ AI fact-check: Misleading')
+                    for f in gemini_flags
+                )
+
+            # Tone/style analysis SECOND — a much weaker signal than an
+            # actual fact-check finding. See calculate_final_score() for
+            # how its weight is dampened when fact_check_confident is True.
+            sensational_count, sens_flags = check_sensationalism(page_text)
+            all_flags.extend(sens_flags)
         else:
             all_flags.append('⚠️ Could not fetch page content for text analysis')
 
     else:
-        # Plain text or social media post pasted directly
-        sensational_count, sens_flags = check_sensationalism(user_input)
-        all_flags.extend(sens_flags)
-
-        # Run Google Fact Check first
+        # Plain text or social media post pasted directly.
+        # Fact-check FIRST, tone/style analysis second as a secondary
+        # signal — see calculate_final_score() for how it's weighted.
         all_flags.append('🔍 Searching fact-checker database...')
         found, fc_results = check_with_google_factcheck(user_input)
 
@@ -1434,6 +1459,7 @@ def analyze():
                     url_score += 20
                 elif any(w in rating_low for w in ['mixed', 'partly', 'partially', 'missing context']):
                     url_score -= 10
+            fact_check_confident = True
         else:
             all_flags.append('ℹ️ No existing fact-checks found — running AI analysis...')
             # Run Gemini with Google Search grounding
@@ -1443,9 +1469,18 @@ def analyze():
             if gemini_reasoning:
                 real_info_parts.append(gemini_reasoning)
             real_sources.extend(gemini_sources)
+            fact_check_confident = any(
+                f.startswith('✅ AI fact-check: Likely true')
+                or f.startswith('❌ AI fact-check: Likely false')
+                or f.startswith('⚠️ AI fact-check: Misleading')
+                for f in gemini_flags
+            )
+
+        sensational_count, sens_flags = check_sensationalism(user_input)
+        all_flags.extend(sens_flags)
 
     # -- Score + verdict --
-    final_score = calculate_final_score(url_score, sensational_count, all_flags)
+    final_score = calculate_final_score(url_score, sensational_count, all_flags, fact_check_confident)
     verdict     = get_verdict(final_score)
 
     if verdict == 'fake':
