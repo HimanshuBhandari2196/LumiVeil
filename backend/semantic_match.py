@@ -28,7 +28,16 @@ GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
 EMBED_MODEL    = 'gemini-embedding-001'
 EMBED_ENDPOINT = f'https://generativelanguage.googleapis.com/v1beta/models/{EMBED_MODEL}:batchEmbedContents'
 
-SIMILARITY_THRESHOLD = 0.75   # tune this if you get too many/few matches
+SIMILARITY_THRESHOLD = 0.90   # conservative stopgap floor — see MIN_MARGIN below
+MIN_MARGIN            = 0.08  # top match must clearly stand out from the sentence's
+                               # average similarity across ALL phrases, not just clear
+                               # an absolute number. Needed because this embedding
+                               # model appears to score a high baseline similarity
+                               # between almost any two pieces of text — a flat
+                               # threshold alone let it match unrelated sentences
+                               # (e.g. a sentence about a stadium location matching
+                               # "new world order") purely because everything scored
+                               # uniformly high, not because anything was distinctive.
 MAX_SENTENCES         = 20    # cap per request, bounds latency + cost
 MIN_SENTENCE_LENGTH    = 15   # skip trivially short fragments
 
@@ -113,13 +122,16 @@ def get_embeddings_batch(texts, task_type='SEMANTIC_SIMILARITY', verbose=False):
         return None
 
 
-def find_semantic_matches(text, threshold=SIMILARITY_THRESHOLD):
+def find_semantic_matches(text, threshold=SIMILARITY_THRESHOLD, min_margin=MIN_MARGIN):
     """
     Compare each sentence in `text` against the pre-computed phrase
-    embeddings. Returns a list of (sentence, matched_phrase, similarity)
-    for anything above `threshold`. Returns [] if embeddings aren't
-    available (no API key, no phrase_embeddings.json, or a request failure)
-    — callers should treat that the same as "no matches found".
+    embeddings. A sentence only counts as a match if its best-matching
+    phrase BOTH clears the absolute threshold AND stands out clearly from
+    that sentence's average similarity across the whole phrase list (see
+    MIN_MARGIN above for why the margin check matters). Returns a list of
+    (sentence, matched_phrase, similarity). Returns [] if embeddings
+    aren't available (no API key, no phrase_embeddings.json, or a request
+    failure) — callers should treat that the same as "no matches found".
     """
     phrase_embeddings = _load_phrase_embeddings()
     if not phrase_embeddings:
@@ -135,14 +147,14 @@ def find_semantic_matches(text, threshold=SIMILARITY_THRESHOLD):
 
     matches = []
     for sentence, vector in zip(sentences, sentence_vectors):
-        best_similarity = 0.0
-        best_phrase     = None
-        for entry in phrase_embeddings:
-            sim = _cosine_similarity(vector, entry['embedding'])
-            if sim > best_similarity:
-                best_similarity = sim
-                best_phrase     = entry['phrase']
-        if best_similarity >= threshold:
+        similarities = [_cosine_similarity(vector, entry['embedding']) for entry in phrase_embeddings]
+        best_idx        = max(range(len(similarities)), key=lambda i: similarities[i])
+        best_similarity = similarities[best_idx]
+        best_phrase     = phrase_embeddings[best_idx]['phrase']
+        mean_similarity = sum(similarities) / len(similarities)
+        margin          = best_similarity - mean_similarity
+
+        if best_similarity >= threshold and margin >= min_margin:
             matches.append((sentence, best_phrase, best_similarity))
 
     return matches
