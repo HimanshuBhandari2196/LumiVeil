@@ -475,7 +475,15 @@ coverage — leave primary_source_description empty if none was found."""
                     'tools': [{'google_search': {}}],
                     'generationConfig': {
                         'temperature':     0.1,
-                        'maxOutputTokens': 500
+                        'maxOutputTokens': 1200
+                        # Was 500, calibrated for the old, smaller response
+                        # schema. The current schema (sources_found array,
+                        # corroboration/primary-source fields) is longer —
+                        # too tight a limit here silently truncates the
+                        # JSON mid-object, which shows up as "AI analysis
+                        # completed but response was unclear" and quietly
+                        # falls back to a generic score instead of an
+                        # honest answer.
                     }
                 },
                 timeout=30
@@ -525,7 +533,17 @@ coverage — leave primary_source_description empty if none was found."""
         try:
             result = json.loads(text)
         except json.JSONDecodeError:
-            return 0, ['ℹ️ AI analysis completed but response was unclear'], '', []
+            # Fallback: Gemini occasionally wraps the JSON in commentary
+            # despite instructions not to. Try pulling out the outermost
+            # {...} block before giving up entirely.
+            match = re.search(r'\{.*\}', text, re.DOTALL)
+            if match:
+                try:
+                    result = json.loads(match.group(0))
+                except json.JSONDecodeError:
+                    return 0, ['ℹ️ AI analysis completed but response was unclear'], '', []
+            else:
+                return 0, ['ℹ️ AI analysis completed but response was unclear'], '', []
 
         verdict    = result.get('verdict', 'unverifiable')
         confidence = int(result.get('confidence', 50))
@@ -1520,9 +1538,16 @@ def analyze():
                 )
                 # Distinct from "mixed" (contradictory evidence found) —
                 # this means NOTHING was found either way, so the honest
-                # answer is "not enough evidence", not a guess.
+                # answer is "not enough evidence", not a guess. A technical
+                # parse failure counts too — either way we don't have a
+                # real answer, so don't let it silently default to a
+                # numeric "mixed" score that implies conflicting evidence
+                # we don't actually have.
                 insufficient_evidence = (not fact_check_confident) and any(
-                    'No corroborating sources found' in f for f in gemini_flags
+                    'No corroborating sources found' in f
+                    or 'response was unclear' in f
+                    or 'no text response received' in f
+                    for f in gemini_flags
                 )
 
             # Tone/style analysis SECOND — a much weaker signal than an
@@ -1584,7 +1609,10 @@ def analyze():
                 for f in gemini_flags
             )
             insufficient_evidence = (not fact_check_confident) and any(
-                'No corroborating sources found' in f for f in gemini_flags
+                'No corroborating sources found' in f
+                or 'response was unclear' in f
+                or 'no text response received' in f
+                for f in gemini_flags
             )
 
         sensational_count, sens_flags = check_sensationalism(user_input)
