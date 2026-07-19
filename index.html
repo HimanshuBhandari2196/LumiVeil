@@ -1211,7 +1211,9 @@
     window.addEventListener('message', function(event) {
       if (event.source !== window) return;
       if (!event.data || event.data.type !== 'LUMIVEIL_LOGIN_ACK') return;
-      // Extension got the tokens — update UI and close tab
+      // Extension got the tokens — stop retrying, update UI, close tab
+      clearInterval(_ackRetryInterval);
+      clearTimeout(_ackTimeoutId);
       document.getElementById('modalLoginSuccess').textContent = '✅ Connected! You can close this tab.';
       setTimeout(function() { window.close(); }, 2000);
     });
@@ -1220,13 +1222,38 @@
     // Uses window.postMessage since chrome.runtime is not available
     // on regular webpages. The extension's content script listens
     // for this message and relays it to background.js.
+    var _ackRetryInterval = null;
+    var _ackTimeoutId     = null;
+
     function sendTokensToExtension(token, refreshToken, user) {
-      window.postMessage({
-        type:          'LUMIVEIL_LOGIN',
-        token:         token,
-        refresh_token: refreshToken,
-        user:          user
-      }, '*');
+      function post() {
+        window.postMessage({
+          type:          'LUMIVEIL_LOGIN',
+          token:         token,
+          refresh_token: refreshToken,
+          user:          user
+        }, '*');
+      }
+
+      // The extension's content script attaches its listener at
+      // document_idle, which can fire AFTER this inline script has
+      // already run (especially for the auto-connect-on-load case, which
+      // fires immediately at the top of page load). If the very first
+      // postMessage goes out before anyone's listening for it, it's lost
+      // silently and the modal would otherwise be stuck on "Connecting…"
+      // forever. Retry every 400ms — safe to send more than once, since
+      // background.js's store_login handler just overwrites the same
+      // values each time — until the ACK arrives or we give up.
+      clearInterval(_ackRetryInterval);
+      clearTimeout(_ackTimeoutId);
+      post();
+      _ackRetryInterval = setInterval(post, 400);
+
+      _ackTimeoutId = setTimeout(function() {
+        clearInterval(_ackRetryInterval);
+        document.getElementById('modalLoginSuccess').textContent =
+          "⚠️ Couldn't reach the extension. Make sure LumiVeil is installed and enabled, then try again.";
+      }, 8000);
     }
 
     // Puts the modal into "connecting to extension" state — success
