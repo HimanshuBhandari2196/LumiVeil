@@ -28,7 +28,16 @@ GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
 EMBED_MODEL    = 'gemini-embedding-001'
 EMBED_ENDPOINT = f'https://generativelanguage.googleapis.com/v1beta/models/{EMBED_MODEL}:batchEmbedContents'
 
-SIMILARITY_THRESHOLD = 0.90   # conservative stopgap floor — see MIN_MARGIN below
+SIMILARITY_THRESHOLD = 0.85   # calibrated against real data (see
+                               # debug_semantic_match.py output from
+                               # 2026-07-19) — genuine paraphrases scored
+                               # 0.908-0.930, false positives topped out at
+                               # 0.806. 0.85 sits comfortably in that gap.
+                               # MIN_MARGIN below is the primary
+                               # discriminator (cleaner separation in real
+                               # data: 0.132-0.155 for real matches vs
+                               # 0.047-0.071 for false positives) — this
+                               # threshold is mostly a sanity floor.
 MIN_MARGIN            = 0.08  # top match must clearly stand out from the sentence's
                                # average similarity across ALL phrases, not just clear
                                # an absolute number. Needed because this embedding
