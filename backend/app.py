@@ -989,6 +989,24 @@ def check_sensationalism(text):
     return count, flags
 
 
+def _factcheck_rating_icon(rating):
+    """
+    Pick a severity icon for a fact-checker's rating so it's counted
+    correctly by the red-flag tally in the extension UI (which looks for
+    ❌/⚠️/🚩), instead of a confirmed-false rating from a real fact-checker
+    silently not counting as a red flag the way every other kind of
+    concerning finding does.
+    """
+    rating_low = rating.lower()
+    if any(w in rating_low for w in ['false', 'fake', 'incorrect', 'misleading', 'pants on fire']):
+        return '❌'
+    if any(w in rating_low for w in ['true', 'correct', 'accurate', 'verified']):
+        return '✅'
+    if any(w in rating_low for w in ['mixed', 'partly', 'partially', 'missing context']):
+        return '⚠️'
+    return 'ℹ️'
+
+
 def calculate_final_score(url_score, sensational_count, flags, fact_check_confident=False):
     """
     Combine URL score, sensationalism penalty, and flag-based bonuses/penalties
@@ -1504,7 +1522,7 @@ def analyze():
                     publisher = r.get('publisher', 'Unknown')
                     title = r.get('title', '')
                     url_field = r.get('url', '')
-                    all_flags.append(f'📋 Fact-checked by {publisher}: "{rating}"')
+                    all_flags.append(f'{_factcheck_rating_icon(rating)} Fact-checked by {publisher}: "{rating}"')
                     real_info_parts.append(
                         f'{publisher} rated this "{rating}"' + (f' — {title}' if title else '')
                     )
@@ -1576,7 +1594,7 @@ def analyze():
                 publisher = r.get('publisher', 'Unknown')
                 title     = r.get('title', '')
                 url_field = r.get('url', '')
-                all_flags.append(f'  • {publisher}: "{rating}"')
+                all_flags.append(f'  {_factcheck_rating_icon(rating)} {publisher}: "{rating}"')
                 if title:
                     all_flags.append(f'    "{title[:80]}"')
                 real_info_parts.append(
