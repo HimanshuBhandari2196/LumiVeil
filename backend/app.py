@@ -422,7 +422,14 @@ def analyze_with_gemini(claim, context=''):
     if not GEMINI_API_KEY:
         return 0, [], '', []
 
-    prompt = f"""You are a fact-checker. Analyze this claim and determine if it is likely true, false, or unverifiable.
+    prompt = f"""You are a fact-checker verifying a claim the way a careful journalist would:
+search for it, find multiple independent sources, check whether they corroborate or
+contradict each other, and trace toward a primary source (an official statement, press
+release, court filing, or direct quote) wherever possible. Do not rely on a single
+source's framing, and do not let confidence be inflated by wording alone — a claim
+repeated by only one outlet with no independent corroboration should be treated with
+more caution than one confirmed by several unrelated outlets, even if both use
+similarly confident language.
 
 CLAIM: {claim}
 {f'CONTEXT: {context}' if context else ''}
@@ -431,10 +438,22 @@ Respond in this exact JSON format (no markdown, no backticks):
 {{
   "verdict": "true" | "false" | "misleading" | "unverifiable",
   "confidence": 0-100,
-  "reasoning": "1-2 sentence explanation",
+  "reasoning": "1-2 sentence explanation of what the evidence actually shows",
+  "sources_found": [
+    {{"outlet": "name of outlet or site", "stance": "confirms" | "contradicts" | "repeats_without_verification"}}
+  ],
+  "independent_source_count": 0,
+  "primary_source_found": false,
+  "primary_source_description": "",
   "red_flags": ["list", "of", "specific", "issues"] or [],
   "sources_to_check": ["suggested", "sources"] or []
-}}"""
+}}
+
+independent_source_count = number of genuinely separate, non-syndicated outlets you
+found reporting on this (outlets republishing the same wire story don't count as
+separate). primary_source_found/primary_source_description = whether you traced this
+to an original statement, document, or direct quote rather than just secondhand
+coverage — leave primary_source_description empty if none was found."""
 
     GEMINI_MODELS = [
         'gemini-2.5-flash',
@@ -514,12 +533,31 @@ Respond in this exact JSON format (no markdown, no backticks):
         red_flags  = result.get('red_flags', [])
         sources    = result.get('sources_to_check', [])
 
+        sources_found          = result.get('sources_found', []) or []
+        independent_count      = int(result.get('independent_source_count', 0) or 0)
+        primary_source_found   = bool(result.get('primary_source_found', False))
+        primary_source_desc    = result.get('primary_source_description', '') or ''
+        confirming_outlets     = [s.get('outlet', '') for s in sources_found
+                                   if s.get('stance') == 'confirms' and s.get('outlet')]
+
         flags = []
         score_adjustment = 0
 
         if verdict == 'true':
             score_adjustment = max(10, int(confidence * 0.3))
-            flags.append(f'✅ AI fact-check: Likely true (confidence: {confidence}%)')
+            if independent_count <= 1:
+                # A single uncorroborated source isn't strong evidence, even if
+                # Gemini is confident in the wording — cap the credit it gets.
+                score_adjustment = min(score_adjustment, 8)
+                flags.append(f'⚠️ AI fact-check: Likely true, but only found in '
+                             f'{independent_count} source — could not cross-verify '
+                             f'(confidence: {confidence}%)')
+            else:
+                flags.append(f'✅ AI fact-check: Likely true, corroborated by '
+                             f'{independent_count} independent sources (confidence: {confidence}%)')
+            if primary_source_found:
+                score_adjustment += 8
+                flags.append(f'✅ Primary source found: {primary_source_desc}')
         elif verdict == 'false':
             score_adjustment = -max(20, int(confidence * 0.5))
             flags.append(f'❌ AI fact-check: Likely false (confidence: {confidence}%)')
@@ -528,6 +566,8 @@ Respond in this exact JSON format (no markdown, no backticks):
             flags.append(f'⚠️ AI fact-check: Misleading or missing context (confidence: {confidence}%)')
         else:
             flags.append(f'ℹ️ AI fact-check: Could not verify this claim (confidence: {confidence}%)')
+            if independent_count == 0:
+                flags.append('ℹ️ No corroborating sources found')
 
         if reasoning:
             flags.append(f'💭 {reasoning}')
@@ -538,7 +578,21 @@ Respond in this exact JSON format (no markdown, no backticks):
         if sources:
             flags.append(f'🔍 Suggested sources: {", ".join(sources[:3])}')
 
-        return score_adjustment, flags, reasoning, sources
+        # Fold source-corroboration detail into the reasoning text itself —
+        # this is what feeds the "What is real" box, so a claim confirmed by
+        # multiple named outlets (or traced to a primary source) should say
+        # so there, not just carry Gemini's one-line summary.
+        reasoning_parts = [reasoning] if reasoning else []
+        if independent_count >= 2 and confirming_outlets:
+            reasoning_parts.append(
+                f'Corroborated by {independent_count} independent sources, including '
+                f'{", ".join(confirming_outlets[:3])}.'
+            )
+        if primary_source_found and primary_source_desc:
+            reasoning_parts.append(f'Primary source: {primary_source_desc}.')
+        enriched_reasoning = ' '.join(reasoning_parts)
+
+        return score_adjustment, flags, enriched_reasoning, sources
 
     except Exception as e:
         return 0, [f'⚠️ AI fact-check error: {str(e)[:80]}'], '', []
