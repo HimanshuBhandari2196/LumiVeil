@@ -32,7 +32,7 @@ LumiVeil is an open source Chrome extension that automatically detects fake news
 | | Guest | Free | Pro | Max |
 |---|---|---|---|---|
 | Daily analyses | 30 | 30 | 300 | Unlimited |
-| Wait on exhaustion | — | 5 hours | None | None |
+| Wait on exhaustion | 24 hours | 5 hours | None | None |
 | Account required | ❌ | ✅ | ✅ | ✅ |
 | Image & deepfake analysis | ❌ | ❌ | ✅ | ✅ |
 | Analysis history | ❌ | ❌ | Last 50 | Full |
