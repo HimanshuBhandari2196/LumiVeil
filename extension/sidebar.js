@@ -71,6 +71,10 @@ document.addEventListener('DOMContentLoaded', function () {
       verdictBanner.classList.add('verdict-real');
       verdictIcon.textContent = 'REAL';
       verdictText.textContent = 'Likely Real';
+    } else if (result.verdict === 'unverified') {
+      verdictBanner.classList.add('verdict-unverified');
+      verdictIcon.textContent = 'UNVERIFIED';
+      verdictText.textContent = 'Not Enough Evidence — Can\'t Confirm Either Way';
     } else {
       verdictBanner.classList.add('verdict-mixed');
       verdictIcon.textContent = 'MIXED';
@@ -89,7 +93,16 @@ document.addEventListener('DOMContentLoaded', function () {
     trustBarFill.style.width = score + '%';
     trustBarFill.className = 'trust-bar-fill';
 
-    if (score >= 70) {
+    if (result.verdict === 'unverified') {
+      // A neutral score here doesn't mean "somewhat credible" — it means
+      // there was nothing to check it against. Say that plainly instead
+      // of reusing the "mixed credibility" label the number would imply.
+      trustBarFill.classList.add('trust-medium');
+      trustLabel.textContent = 'Not enough evidence to verify';
+      trustLabel.style.color = '#9490A8';
+      trustPreviewText.textContent = 'Not enough evidence available';
+      trustDot.style.background = '#9490A8';
+    } else if (score >= 70) {
       trustBarFill.classList.add('trust-high');
       trustLabel.textContent = 'High credibility';
       trustLabel.style.color = '#22c55e';

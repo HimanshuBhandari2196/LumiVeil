@@ -96,6 +96,16 @@ function injectStyles() {
       box-shadow: 0 4px 24px rgba(245,158,11,0.12), 0 1px 0 rgba(245,158,11,0.25) inset;
     }
 
+    /* Unverified — neutral gray. Not the same as "mixed": nothing was
+       found to corroborate OR contradict, rather than genuinely
+       conflicting evidence, so it shouldn't share the amber "caution"
+       color that implies we found something concerning. */
+    #lumiveil-banner.lv-unverified {
+      background: rgba(14, 14, 16, 0.92);
+      border-bottom: 1px solid rgba(148,144,168,0.4);
+      box-shadow: 0 4px 24px rgba(148,144,168,0.10), 0 1px 0 rgba(148,144,168,0.2) inset;
+    }
+
     #lumiveil-banner.lv-show { top: 0; }
 
     /* ---- LEFT: logo + text ---- */
@@ -127,6 +137,7 @@ function injectStyles() {
     }
     .lv-fake  #lv-title { color: #FCA5A5; }
     .lv-mixed #lv-title { color: #FCD34D; }
+    .lv-unverified #lv-title { color: #C4C1D4; }
 
     #lv-subtitle {
       font-size: 11px; color: rgba(255,255,255,0.45); line-height: 1.3;
@@ -144,6 +155,7 @@ function injectStyles() {
     }
     .lv-fake  #lv-score { background: rgba(239,68,68,0.15); color: #EF4444; border: 1px solid rgba(239,68,68,0.3); }
     .lv-mixed #lv-score { background: rgba(245,158,11,0.15); color: #F59E0B; border: 1px solid rgba(245,158,11,0.3); }
+    .lv-unverified #lv-score { background: rgba(148,144,168,0.15); color: #9490A8; border: 1px solid rgba(148,144,168,0.3); }
 
     #lv-report-btn {
       display: flex; align-items: center; gap: 5px;
@@ -154,6 +166,7 @@ function injectStyles() {
     }
     .lv-fake  #lv-report-btn { background: #EF4444; }
     .lv-mixed #lv-report-btn { background: #F59E0B; color: #0C0C10; }
+    .lv-unverified #lv-report-btn { background: #9490A8; color: #0C0C10; }
     #lv-report-btn:hover { opacity: 0.88; transform: translateY(-1px); }
 
     #lv-dismiss-btn {
@@ -176,8 +189,9 @@ function createBanner(result) {
   const existing = document.getElementById('lumiveil-banner');
   if (existing) existing.remove();
 
-  const isFake  = result.verdict === 'fake';
-  const isMixed = result.verdict === 'mixed';
+  const isFake       = result.verdict === 'fake';
+  const isMixed      = result.verdict === 'mixed';
+  const isUnverified = result.verdict === 'unverified';
   const score   = result.trust_score;
   // Match the definition used in sidebar.js's full report — ❌ (hard flag),
   // ⚠️ (warning, e.g. AI-image/deepfake detection, paraphrased sensational
@@ -185,15 +199,19 @@ function createBanner(result) {
   // ✅/ℹ️/🔍/💭 are neutral/positive.
   const flags = result.checks ? result.checks.filter(c => c.includes('❌') || c.includes('⚠️') || c.includes('🚩')).length : 0;
 
-  const title    = isFake
+  const title = isFake
     ? 'This page may contain fake or misleading content'
+    : isUnverified
+    ? "LumiVeil couldn't verify this content — not enough evidence either way"
     : 'This page has mixed credibility signals';
 
-  const subtitle = `Trust score ${score}/100 · ${flags} red flag${flags !== 1 ? 's' : ''} detected`;
+  const subtitle = isUnverified
+    ? `No existing fact-check or corroborating source found · trust score ${score}/100`
+    : `Trust score ${score}/100 · ${flags} red flag${flags !== 1 ? 's' : ''} detected`;
 
   const banner = document.createElement('div');
   banner.id = 'lumiveil-banner';
-  banner.classList.add(isFake ? 'lv-fake' : 'lv-mixed');
+  banner.classList.add(isFake ? 'lv-fake' : isUnverified ? 'lv-unverified' : 'lv-mixed');
 
   banner.innerHTML = `
     <div id="lv-left">

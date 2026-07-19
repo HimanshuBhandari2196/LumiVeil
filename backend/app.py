@@ -1022,7 +1022,18 @@ def calculate_final_score(url_score, sensational_count, flags, fact_check_confid
     return max(0, min(100, score))
 
 
-def get_verdict(score):
+def get_verdict(score, insufficient_evidence=False):
+    """
+    insufficient_evidence: True when neither an existing fact-check nor the
+    AI's own search found anything to corroborate or contradict the claim —
+    genuinely nothing to go on, not the same thing as "mixed" (which means
+    real, contradictory evidence was found on both sides). LumiVeil can only
+    check what's actually out there on the internet; when there's nothing
+    findable, the honest answer is "we don't know," not a guess dressed up
+    as a score.
+    """
+    if insufficient_evidence:
+        return 'unverified'
     if score >= 70: return 'real'
     if score >= 40: return 'mixed'
     return 'fake'
@@ -1420,6 +1431,7 @@ def analyze():
     real_info_parts = []   # actual verified facts found during analysis, if any
     real_sources     = []  # actual source URLs found during analysis, if any
     fact_check_confident = False  # True once a real verdict (not 'unverifiable') is reached
+    insufficient_evidence = False # True when nothing findable was found either way
 
     if is_image:
         # Image analysis — Pro/Max only
@@ -1495,13 +1507,22 @@ def analyze():
                 if gemini_reasoning:
                     real_info_parts.append(gemini_reasoning)
                 real_sources.extend(gemini_sources)
-                # A confident verdict shows up as one of these specific
-                # flag prefixes — 'unverifiable' produces neither.
+                # A confident verdict shows up as one of these phrases —
+                # 'true' has two variants (single-source vs corroborated,
+                # see analyze_with_gemini) that both count as "a verdict was
+                # reached", even though single-source gets less score credit.
+                # 'unverifiable' produces none of these.
                 fact_check_confident = any(
-                    f.startswith('✅ AI fact-check: Likely true')
-                    or f.startswith('❌ AI fact-check: Likely false')
-                    or f.startswith('⚠️ AI fact-check: Misleading')
+                    'AI fact-check: Likely true' in f
+                    or 'AI fact-check: Likely false' in f
+                    or 'AI fact-check: Misleading' in f
                     for f in gemini_flags
+                )
+                # Distinct from "mixed" (contradictory evidence found) —
+                # this means NOTHING was found either way, so the honest
+                # answer is "not enough evidence", not a guess.
+                insufficient_evidence = (not fact_check_confident) and any(
+                    'No corroborating sources found' in f for f in gemini_flags
                 )
 
             # Tone/style analysis SECOND — a much weaker signal than an
@@ -1557,10 +1578,13 @@ def analyze():
                 real_info_parts.append(gemini_reasoning)
             real_sources.extend(gemini_sources)
             fact_check_confident = any(
-                f.startswith('✅ AI fact-check: Likely true')
-                or f.startswith('❌ AI fact-check: Likely false')
-                or f.startswith('⚠️ AI fact-check: Misleading')
+                'AI fact-check: Likely true' in f
+                or 'AI fact-check: Likely false' in f
+                or 'AI fact-check: Misleading' in f
                 for f in gemini_flags
+            )
+            insufficient_evidence = (not fact_check_confident) and any(
+                'No corroborating sources found' in f for f in gemini_flags
             )
 
         sensational_count, sens_flags = check_sensationalism(user_input)
@@ -1568,12 +1592,16 @@ def analyze():
 
     # -- Score + verdict --
     final_score = calculate_final_score(url_score, sensational_count, all_flags, fact_check_confident)
-    verdict     = get_verdict(final_score)
+    verdict     = get_verdict(final_score, insufficient_evidence)
 
     if verdict == 'fake':
         summary = f'⚠️ This content shows {len(all_flags)} red flags and scores low on our trust meter. Treat with caution.'
     elif verdict == 'real':
         summary = f'✅ This content appears credible with a trust score of {final_score}/100.'
+    elif verdict == 'unverified':
+        summary = ("⚪ We couldn't find enough information to verify this — no existing fact-check "
+                   "and no independent sources corroborating it either way. That's not the same as "
+                   "it being false; we just don't have enough to go on yet.")
     else:
         summary = '⚠️ This content has mixed signals. Verify with trusted sources before sharing.'
 
